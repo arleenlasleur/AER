@@ -1,0 +1,21 @@
+class SomeExample extends actor;
+
+var() Array<int> SomeTestArray;
+
+event PostBeginPlay()
+{
+    local int i;
+    
+    for(i = 0; i < SomeTestArray.Length; i++)
+    {
+        log(SomeTestArray[i]);
+    }
+
+    SomeTestArray[2] = 55;
+}
+
+DefaultProperties{
+    SomeTestArray(0)=10
+    SomeTestArray(1)=50
+    SomeTestArray(2)=-10
+}

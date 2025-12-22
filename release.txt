@@ -1,0 +1,4 @@
+create scriptedtexture in unrealed. basetextire included in \disp
+change utx.scriptedtexture to internal (to remove dependency)
+enable bUse32bpp color mode
+change in code.

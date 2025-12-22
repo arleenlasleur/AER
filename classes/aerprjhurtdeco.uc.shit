@@ -1,0 +1,46 @@
+class aerprjhurtdeco extends Projectile;
+
+var vector      prev_location,fire_location;
+var int         trail_count;
+
+function postbeginplay(){
+   prev_location = location;
+   fire_location = location;
+}
+
+function tick(float f){
+   if(vsize(prev_location-location) >= 32){
+      prev_location = location;                                                 // todo move this to weapon, use rotator
+      trail_count++;
+      spawn(class'AerGr_trail_bullet');
+
+//    if(trail_count > 4 && allowtrails && !region.zone.bwaterzone) t = spawn(class'AerGr_trail_bullet'); // todo remove
+//    if(region.zone.bwaterzone) spawn(class'aerbubble');
+   }
+}
+
+auto state Flying{
+Begin:
+   velocity = vector(rotation) * speed;
+}
+
+function Explode(vector HitLocation,vector HitNormal){
+   destroy();
+}
+
+function ProcessTouch(actor other, vector hitlocation){
+   destroy();
+}
+
+defaultproperties{
+        ambientglow=0
+        trail_count=1
+        prev_location=(X=0.0,Y=0.0,Z=0.0)
+        fire_location=(X=0.0,Y=0.0,Z=0.0)
+        MomentumTransfer=0
+        speed=8000.0
+        MaxSpeed=8000.0
+        Damage=0
+        DrawType=DT_None
+        ScaleGlow=0.0
+}

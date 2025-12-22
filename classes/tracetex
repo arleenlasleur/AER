@@ -1,0 +1,28 @@
+const noexport PF_Invisible
+const noexport PF_Masked
+const noexport PF_Translucent
+const noexport PF_Environment
+const noexport PF_Semisolid
+const noexport PF_Modulated
+const noexport PF_FakeBackdrop
+const noexport PF_AutoUPan
+const noexport PF_AutoVPan
+const noexport PF_NoSmooth
+const noexport PF_BigWavy
+const noexport PF_SmallWavy
+const noexport PF_AlphaBlend
+const noexport PF_SpecialLit
+const noexport PF_Unlit
+const noexport PF_Mirrored
+// Useage: if( (ResultFlags & PF_Unlit)!=0 ) -> Surface is unlit
+                                                               
+native(1736) final function bool TraceSurfHitInfo(                                                              
+        vector                  Start,
+        vector                  End,
+        optional out vector     HitLocation,
+        optional out vector     HitNormal,
+        optional out Texture    HitTex,
+        optional out int        HitFlags,
+        optional vector         Extent,
+        optional out Actor      HitActor,
+        optional int            TraceFlags 

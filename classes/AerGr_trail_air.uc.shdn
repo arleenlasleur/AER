@@ -1,0 +1,114 @@
+class AerGr_trail_air extends Effects;
+#exec texture import file="textures\push\aerpusha00.pcx" name="aerpusha00" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha01.pcx" name="aerpusha01" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha02.pcx" name="aerpusha02" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha03.pcx" name="aerpusha03" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha04.pcx" name="aerpusha04" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha05.pcx" name="aerpusha05" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha06.pcx" name="aerpusha06" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha07.pcx" name="aerpusha07" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha08.pcx" name="aerpusha08" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha09.pcx" name="aerpusha09" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha10.pcx" name="aerpusha10" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha11.pcx" name="aerpusha11" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha12.pcx" name="aerpusha12" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha13.pcx" name="aerpusha13" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha14.pcx" name="aerpusha14" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha15.pcx" name="aerpusha15" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha16.pcx" name="aerpusha16" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha17.pcx" name="aerpusha17" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha18.pcx" name="aerpusha18" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha19.pcx" name="aerpusha19" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha20.pcx" name="aerpusha20" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha21.pcx" name="aerpusha21" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha22.pcx" name="aerpusha22" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha23.pcx" name="aerpusha23" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha24.pcx" name="aerpusha24" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha25.pcx" name="aerpusha25" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha26.pcx" name="aerpusha26" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha27.pcx" name="aerpusha27" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha28.pcx" name="aerpusha28" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha29.pcx" name="aerpusha29" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha30.pcx" name="aerpusha30" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha31.pcx" name="aerpusha31" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha32.pcx" name="aerpusha32" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha33.pcx" name="aerpusha33" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha34.pcx" name="aerpusha34" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha35.pcx" name="aerpusha35" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpusha36.pcx" name="aerpusha36" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\push\aerpushw.pcx" name="aerpushw" package="AER" group="Push" mips=1 flags=0 btc=-2
+#exec texture import file="textures\disp\aerscreenbg.png" name="aerscreenbg" package="AER" group="Disp" mips=1 flags=0 btc=-2
+
+#exec mesh import mesh="aertrail" anivfile="models\aertrail_a.3d" datafile="models\aertrail_d.3d" x=0 y=0 z=0 mlod=0
+#exec mesh origin mesh="aertrail" x=0 y=0 z=0
+#exec mesh sequence mesh="aertrail" seq="All" startframe=0 numframes=1
+#exec meshmap new meshmap="aertrail" mesh="aertrail"
+#exec meshmap scale meshmap="aertrail" x=0.03131 y=0.03131 z=0.06262
+
+var texture trailtex[37];
+var int i;
+
+function postbeginplay(){
+   local rotator r;
+   i=0;
+   r=self.rotation;
+   r.roll=frand()*65535;
+   self.setrotation(r);
+   settimer(0.032,true);
+}
+function timer(){
+   if(i<37){
+      ambientglow=255/i;
+      multiskins[0]=trailtex[i];
+      drawscale+=0.024;
+      i++;
+   }else destroy();
+   settimer(0.032,true);
+}
+
+defaultproperties{
+        i=0
+        trailtex(0)=Texture'AER.Push.aerpusha00'
+        trailtex(1)=Texture'AER.Push.aerpusha01'
+        trailtex(2)=Texture'AER.Push.aerpusha02'
+        trailtex(3)=Texture'AER.Push.aerpusha03'
+        trailtex(4)=Texture'AER.Push.aerpusha04'
+        trailtex(5)=Texture'AER.Push.aerpusha05'
+        trailtex(6)=Texture'AER.Push.aerpusha06'
+        trailtex(7)=Texture'AER.Push.aerpusha07'
+        trailtex(8)=Texture'AER.Push.aerpusha08'
+        trailtex(9)=Texture'AER.Push.aerpusha09'
+        trailtex(10)=Texture'AER.Push.aerpusha10'
+        trailtex(11)=Texture'AER.Push.aerpusha11'
+        trailtex(12)=Texture'AER.Push.aerpusha12'
+        trailtex(13)=Texture'AER.Push.aerpusha13'
+        trailtex(14)=Texture'AER.Push.aerpusha14'
+        trailtex(15)=Texture'AER.Push.aerpusha15'
+        trailtex(16)=Texture'AER.Push.aerpusha16'
+        trailtex(17)=Texture'AER.Push.aerpusha17'
+        trailtex(18)=Texture'AER.Push.aerpusha18'
+        trailtex(19)=Texture'AER.Push.aerpusha19'
+        trailtex(20)=Texture'AER.Push.aerpusha20'
+        trailtex(21)=Texture'AER.Push.aerpusha21'
+        trailtex(22)=Texture'AER.Push.aerpusha22'
+        trailtex(23)=Texture'AER.Push.aerpusha23'
+        trailtex(24)=Texture'AER.Push.aerpusha24'
+        trailtex(25)=Texture'AER.Push.aerpusha25'
+        trailtex(26)=Texture'AER.Push.aerpusha26'
+        trailtex(27)=Texture'AER.Push.aerpusha27'
+        trailtex(28)=Texture'AER.Push.aerpusha28'
+        trailtex(29)=Texture'AER.Push.aerpusha29'
+        trailtex(30)=Texture'AER.Push.aerpusha30'
+        trailtex(31)=Texture'AER.Push.aerpusha31'
+        trailtex(32)=Texture'AER.Push.aerpusha32'
+        trailtex(33)=Texture'AER.Push.aerpusha33'
+        trailtex(34)=Texture'AER.Push.aerpusha34'
+        trailtex(35)=Texture'AER.Push.aerpusha35'
+        trailtex(36)=Texture'AER.Push.aerpusha36'
+        DrawScale=0.02
+        Mesh=Mesh'AER.aertrail'
+        MultiSkins(0)=Texture'AER.Disp.aerscreenbg'
+        RemoteRole=ROLE_SimulatedProxy
+        DrawType=DT_Mesh
+        AmbientGlow=255
+}

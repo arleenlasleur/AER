@@ -1,0 +1,7 @@
+ucc master -masterpath=c:\u227_dev\skjinf -srcpath=d:\unreal (mb srcpath shit)
+
+setup install skjinf.umod, setup uninstall skjinf.umod
+
+ucc ripandtear in.unr out.unr <texture|sound|class|music|mesh>
+
+https://www.oldunreal.com/wiki/index.php?title=Commandlet#ExportPackage

@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="windows-1251" />
+<style>
+html{background:linear-gradient(#223,#112);height: 100vh;}
+span#about{color:#294;}
+span#warn,span#hkwarn_ind{color:#fea;}
+span#hkwarn_ind{color:#fea;opacity:0;}
+span#hk_adv_ind{opacity:1;}
+
+body{color:#777;font:20pt monospace;}
+input[type="text"]{background-color:#444; color:#ffb; border:none; margin-top: 4px; font:25pt monospace;}
+input[type="text"]:focus{border:none;outline: none !important;}
+input.in:focus{background-color:#556;}
+
+</style>
+</head>
+<body>
+<pre>
+<span id="about">Metric system ruler converter</span> for unrealed, v. 0.2-2025.01.04 by Arleen Lasleur.
+<span id="warn">Press Enter second time</span> after math expression parsed, to invoke convert again.
+For imperial or other systems you can change <span style="color:#aaa;">uu_to_m</span> variable.
+</pre>
+
+<input type="text" class="in" id="input_metric" /> <span id="scale_ind"></span><br>
+<input type="text" id="out_unr_free" /> UU<br>
+<input type="text" id="out_unr_grid" disabled /> @<span id="grid_ind"></span>UU grid<br>
+
+<pre>
+Hotkeys:
+Bksp/Del/arrows - normal char undo
+Numpad/Ent      - enter data
+Y U             - switch to metric/unrealed units input mode
+<span id="hkwarn_ind">Unsupported while working in UU -> metric mode</span>
+<span id="hk_adv_ind">Ins/Shift+Del   - reset/clear
++ - / *         - unrealed-style math
+PgUp/Dn         - snapped roll
+C M             - set scale to cm / m
+Q W E R         - set grid to 4 / 8 / 16 / 32
+I               - remove non-integer part of input</span>
+</pre>
+
+<script>
+var uu_to_m=0.02125;
+var scale="m",scalemod=1.0,grid=16,focustarg,metric,unrealed,gridded;
+function docmd(e){
+//  console.log(e)
+  if((e.shiftKey && e.key=="Delete") || (!e.shiftKey && e.key=="Insert")){
+                      e.preventDefault(); metric.value = "";  return; }
+  if(e.code=="KeyC"){ e.preventDefault(); scale = "cm"; setscale(); return; }
+  if(e.code=="KeyM"){ e.preventDefault(); scale = "m";  setscale(); return; }
+  if(e.code=="KeyQ"){ e.preventDefault(); grid = 4;     setgrid();  return; }
+  if(e.code=="KeyW"){ e.preventDefault(); grid = 8;     setgrid();  return; }
+  if(e.code=="KeyE"){ e.preventDefault(); grid = 16;    setgrid();  return; }
+  if(e.code=="KeyR"){ e.preventDefault(); grid = 32;    setgrid();  return; }
+  if(e.code=="KeyI"){ e.preventDefault(); killfloat();              return; }
+  if(e.code=="KeyY"){ e.preventDefault(); focustarg.className="";   focustarg = metric;
+                      _obj("hkwarn_ind").style.opacity=0; _obj("hk_adv_ind").style.opacity=1;
+                                          focustarg.className="in"; focustarg.focus(); return; }
+  if(e.code=="KeyU"){ e.preventDefault(); focustarg.className="";   focustarg = unrealed;
+                      _obj("hkwarn_ind").style.opacity=1; _obj("hk_adv_ind").style.opacity=0.3;
+                                          focustarg.className="in"; focustarg.focus(); return; }
+  if(e.code=="PageUp"){   e.preventDefault(); dosnaproll(true);  return; }
+  if(e.code=="PageDown"){ e.preventDefault(); dosnaproll(false); return; }
+}
+function dosnaproll(bGrow){
+  var inp;
+  inp = gridded.value;
+  if(isNaN(inp)) return;
+  inp = parseInt(inp);
+  if(bGrow) inp += grid; else inp -= grid;
+  gridded.value = inp;
+  metric.value = parseFloat(inp/scalemod*uu_to_m).toFixed(2);
+}
+function killfloat(){
+  var inp;
+  inp = focustarg.value;
+  if(isNaN(inp)) return;
+  inp = parseInt(inp);
+  focustarg.value = inp;
+}
+function douconv(e){
+  if(e.code=="Escape") gobackmetric();
+  if(e.code=="KeyY") gobackmetric();
+  if(e.which!=13) return;
+  inp = unrealed.value;
+  if(isNaN(inp)) inp = 0;
+  inp = eval(inp);
+  metric.value = parseFloat(inp/scalemod*uu_to_m).toFixed(2);
+  gobackmetric();
+}
+function gobackmetric(){ unrealed.value = ""; docmd({code:"KeyY",preventDefault:function(){}}); }
+function docalc(e){
+  var inp,out,out_lsb,keyok=false;
+  if(e.which>=42 && e.which<=57) keyok = true;
+  if(e.which==13) keyok = true;
+  if(!keyok){ e.preventDefault(); return; }
+  inp = metric.value;
+  if(e.which==13){
+     out = eval(inp);
+     _obj("input_metric").value = parseFloat(out);
+  }
+  if(isNaN(inp)) inp = 0;
+  out = parseFloat((inp*scalemod)/uu_to_m).toFixed(2);
+  unrealed.value = out;
+  out = parseInt(out);
+  out_lsb = out % grid;
+  out -= out_lsb;
+  out += grid;
+  gridded.value = out;
+}
+function setscale(){
+  switch(scale){
+     case "m":  scalemod = 1.0;  break;
+     case "cm": scalemod = 0.01; break;
+  }
+  _obj("scale_ind").innerText = scale;
+}
+function setgrid(){
+  _obj("grid_ind").innerText = grid;
+}
+document.addEventListener("DOMContentLoaded",function(){
+  metric   = _obj("input_metric");
+  unrealed = _obj("out_unr_free");
+  gridded  = _obj("out_unr_grid");
+  metric.addEventListener("keypress",function(e){docalc(e);});
+  metric.addEventListener("keyup",function(e){docmd(e);});
+  unrealed.addEventListener("keyup",function(e){douconv(e);});
+  focustarg = metric;
+  metric.addEventListener("blur",function(){if(this==focustarg) focustarg.focus();});
+  unrealed.addEventListener("blur",function(){if(this==focustarg) focustarg.focus();});
+  focustarg.focus();
+  setscale();
+  setgrid();
+});
+function _obj(s){ return document.getElementById(s); }
+</script>
+</body>
+</html>

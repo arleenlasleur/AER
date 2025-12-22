@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="windows-1251" />
+<style>
+html{background:linear-gradient(#223,#112);height: 100vh;}
+span#about{color:#062;}
+body{color:#777;font:20pt monospace;}
+textarea{background:rgba(0,0,30,0.3); color:#ffb; border:1px solid #cfc; margin-top: 24px; font:16pt monospace;float:left;}
+button{background:linear-gradient(#447,#224); margin-left:24px; color:#bbc; margin-top: 4px; font:18pt monospace;}
+</style>
+</head>
+<body>
+<pre>
+<span id="about">Conventional text adapter for unrealed, v. 0.1-2024.05.01</span> by Arleen Lasleur.
+<textarea id="message" wrap=physical rows=26 cols=55></textarea><br>
+<span id="directions">  How to prepare text:
+  1. Edit in FAR.
+  2. Press F11 -> Align block.
+  3. Use settings:
+     [ 34] Right margin
+     [x]   Reformat block    
+     [x]   Do not leave short
+     [ ]   Justify right border
+  4. Hyphenize at your will.</span>
+</pre>
+<br>  <button id="tounr">Destroy EOLs (txt2unr) &gt;&gt;&gt;</button>
+<br>  <button id="totxt">Place EOLs (unr2txt) &gt;&gt;&gt;</button>
+
+<script>
+function dounr(){
+  var content=document.getElementById("message").value;
+  content=content.replace(/\r/g,"");
+  content=content.replace(/\n/g,"");
+  document.getElementById("message").value=content;
+}
+function dotxt(){
+  var screen_length = 34;
+  var content=document.getElementById("message").value;
+  String.prototype.insert = function(index, string) {
+    if (index > 0) return this.substring(0, index) + string + this.substring(index, this.length);
+    return string + this;
+  };
+  for(var i=0;i<parseInt(content.length/screen_length);i++) content = content.insert(i*(screen_length+2), "\r\n");
+  content = content.substr(2);
+  document.getElementById("message").value=content;
+}
+document.addEventListener("DOMContentLoaded",function(){
+  document.getElementById("tounr").addEventListener("click",function(){ dounr(); });
+  document.getElementById("totxt").addEventListener("click",function(){ dotxt(); });
+});
+</script>
+</body>
+</html>

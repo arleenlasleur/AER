@@ -1,0 +1,8 @@
+!!!USED CLASSES OR DEFINITIONS SHOULD BE GIVEN IN UNREAL.INI AFTER BIND PARENTS, NOT BEFORE!!!
+
+unreal.ini
+
+[Editor.EditorEngine]
+EditPackages=pkg_name
+
+rebuild by "ucc make" command

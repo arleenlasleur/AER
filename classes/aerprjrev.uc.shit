@@ -1,0 +1,18 @@
+class aerprjrev extends aerprjfwd;
+
+state Launch{
+Begin:
+   Velocity = Vector(Rotation) * (-speed) * 10;
+}
+
+function Explode(vector HitLocation, vector HitNormal){
+//   if(vsize(prev_location-fire_location) > vsize(location-fire_location)) stop_effects = true;
+//   if(!stop_effects) AERSpawnSparks(HitLocation, HitNormal);  // shithack: wtf we flying towards instigator, prohibit effects
+   AERSpawnSparks(HitLocation,HitNormal);
+   destroy();
+}
+function tick(float f){}
+
+defaultproperties{
+        MomentumTransfer=-300
+}

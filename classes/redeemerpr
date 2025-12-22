@@ -1,0 +1,16 @@
+       FovScale = 1 / Tan(FClamp(PlayerPawn(Owner).DesiredFOV, 1, 170) / 360 * Pi);
+       foreach VisibleCollidingActors(class'Pawn', P, 2000,, true){
+               Dir = P.Location - Location;
+               Dist = VSize(Dir);
+               if ( ((Dir / Dist) Dot X) > 0.7 * FovScale){
+                       Dir = Dir / (Dir Dot X);
+                       XPos = 0.5 * (Canvas.SizeX + Canvas.SizeX * (Dir Dot Y) * FovScale);
+                       YPos = 0.5 * (Canvas.SizeY - Canvas.SizeX * (Dir Dot Z) * FovScale);
+                       Scale = FMax(1.0, class'UTC_HUD'.static.B227_CrosshairSize(Canvas, 640.0));
+                       Canvas.SetPos(XPos - 0.5 * Texture'Crosshair6'.USize * Scale, YPos - 0.5 * Texture'Crosshair6'.VSize * Scale);
+                       Canvas.DrawIcon(texture'CrossHair6', Scale);
+                       Canvas.SetPos(Xpos - 12, YPos + Texture'Crosshair6'.VSize * Scale);
+                       Canvas.DrawText(int(Dist), true);
+               }
+       }
+       Canvas.Reset();
