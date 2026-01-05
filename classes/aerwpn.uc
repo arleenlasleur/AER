@@ -412,6 +412,7 @@ var travel bool         ena_synth,                    // 16 Hz + taryd rod synth
                                                       // todo mb FField use separate tarydbio ammo
                         ena_moreammo_2x,              // up to 480 ammo clip
                         ena_moreammo_3x;              // up to 720
+// todo pack this into bitfield byte, also check other travel vars incl their names. keep going on low browsestring length profile
 // -------------------------------------------------------------------------------------------------------------------------
 
 function calccoords(canvas c){
