@@ -1,4 +1,5 @@
 cd..
+rem todo exclude .git and .stfolder
 if exist AER.7z.old del AER.7z.old
 ren AER.7z AER.7z.old
 7za a -mx9 -bb0 -r AER.7z AER

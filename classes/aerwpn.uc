@@ -2445,7 +2445,10 @@ function level_setup(){
    for(i=0;i<3;i++){
       if(FirePlayers[i]!=none) continue;
       FirePlayers[i] = spawn(class'AerGR_FP',,,location);
-      if(FirePlayers[i]!=none) FirePlayers[i].setbase(self);
+      if(FirePlayers[i]!=none){
+         FirePlayers[i].setbase(self);
+//         FirePlayers[i].w = self;
+      }
 //    broadcastmessage(FirePlayers[i]);
    }
 }
