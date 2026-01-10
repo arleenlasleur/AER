@@ -428,9 +428,12 @@ defaultproperties{
         fire_location=(X=0.0,Y=0.0,Z=0.0)
         DisableHitsens=False
         MomentumTransfer=15000
-        speed=40000.0
+        speed=22000.0
+//      speed=12200 270m/s
+//      speed=40000.0
 //        speed=26000.0 latest
-        MaxSpeed=48000.0
+        MaxSpeed=18000.0
+//      MaxSpeed=48000.0
         Damage=5.0
 //        DrawType=DT_Mesh
         DrawType=DT_None
@@ -443,7 +446,7 @@ defaultproperties{
         LightEffect=LE_NonIncidence
         LightType=LT_None
 //        LightType=LT_Steady
-        LightBrightness=2
+        LightBrightness=5
         LightHue=170
         LightSaturation=195
         LightRadius=6

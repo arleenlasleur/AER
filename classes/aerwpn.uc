@@ -2285,7 +2285,7 @@ state Idle{
       if(owner == none) return true;
       owner.playsound(sound'aerfire_reload', SLOT_None, 32);
       for(i=0;i<3;i++){
-         if(FirePlayers[i]!=none) FirePlayers[i].query_fire();
+//         if(FirePlayers[i]!=none) FirePlayers[i].query_fire();  // 2026-01-11: disabled
       }
 /*    tmp_byte = ammo_chg >> 2;                        // 2024-04-15
       tmp_byte = tmp_byte << 2;
