@@ -5,6 +5,7 @@
 //  trigger notify without dependency.
 //  exploding corpses setup info object
 //  trigger() func take action and destroy this object
+//  seems ok: snipe prevents transmsg_proximity. maybe show in red (test here: duskfall first corpse on rock, 2 brutes seen)
 // ------------------------------------------------------------------------------------------------------------------------------
 // Weapon design points:              Ignored/not a goal:                  Integrated features:          Misc groups:
 //   - Upak CAR replacement             - not a RL/GL or heavy weapon        - translator
@@ -393,7 +394,14 @@ var radar_data          radar[radar_max];             // pivot aiming
 struct radarlock_data { var int   x[8], y[8]; };      // these 8 are for t1t2t3t4 b1b2b3b4 dots of collisionbox, not eight targs!
 var radarlock_data      radarlock[radar_max];         // collision box aiming
 var bool                ignore_hitsens_trig, ignore_hitsens_rst;
-// ---  compass mark related -----------------------------------------------------------------------------------------------
+// --- areamap -------------------------------------------------------------------------------------------------------------
+var bool ava_areamap;                                 // area intel is known for current level
+var byte AMI_DataStart;                               // from where to copy data, used for discoverable multiple maps
+var texture AMI_MapTex[63];                           // payload
+var int AMI_AlignX[63],AMI_AlignY[63],AMI_AlignZ[63]; // align
+var byte AMI_SHR_factor;                              // bitshift factor (pixel to uu scale)
+var float AMI_AreaHeight;                             // AreaZ height if other than 128
+// --- compass mark related ------------------------------------------------------------------------------------------------
 var vector              pos_objective;
 var bool                ava_objective,
                         ena_objective;
@@ -965,8 +973,8 @@ simulated event RenderTexture(ScriptedTexture Tex){
    }  */
 // ====================================================================================== area map
    if(ena_areamap){
-      render_areamap(tex);     // todo set pn.bDirectional as discover flag. introduce discovertrigger.
-//    render_areamap_new(tex);
+//    render_areamap(tex);     // todo set pn.bDirectional as discover flag. introduce discovertrigger.
+      render_areamap_new(tex);
       return;
    }
 // ====================================================================================== failed forcefield indicator
@@ -1018,13 +1026,10 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
                is_relevant;
    local color pc;
    local byte  nmarker,i,k;
-   local areamapdata amd;                        // mb todo make this global
    if(owner!=none) p = playerpawn(owner);
    if(p == none) return;
-   amd = FindAMD();
-   if(amd == none){
+   if(!ava_areamap){
       pc = assign_presence_color(true,246,218,109);
-//      pc = assign_presence_color(true,200,200,255);
       tex.drawcoloredtext(70,130,"Area is unknown.",font'aerfontsmb',pc);
       return;
    }
@@ -1041,21 +1046,33 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
       }
       for(i=0;i<63;i++){                                   // todo mb 1st pass show tex[0], then single z-match. less drawcalls
                                                            // todo  reqiure merged tex for these coords, or "single z" indicator
-         if(amd.MapTex[i] == none) continue;  // mb break here
-         user_z = p.location.z % 128;
+         if(AMI_MapTex[i] == none) continue;  // mb break here
+         user_z = p.location.z % AMI_AreaHeight;
          user_z = p.location.z - user_z;
-         is_relevant = (abs(user_z - amd.AreaZ[i]) <= 128);
+         is_relevant = (abs(user_z - AMI_AlignZ[i]) <= AMI_AreaHeight);
          if(!dimmed_bg && !is_relevant) continue;
-         user_x = int(p.location.x) >> amd.SHR_factor;
-         user_y = int(p.location.y) >> amd.SHR_factor;
-         prn_tlx = user_x; prn_tlx += (amd.AlignX[i] >> amd.SHR_factor); prn_tlx += (amd.MapTex[i].Usize>>1); prn_tlx -= disp_hw;
-         prn_tly = user_y; prn_tly += (amd.AlignY[i] >> amd.SHR_factor); prn_tly += (amd.MapTex[i].Vsize>>1); prn_tly -= disp_hh;
+         user_x = int(p.location.x) >> AMI_SHR_factor;
+         user_y = int(p.location.y) >> AMI_SHR_factor;
+         prn_tlx = user_x; prn_tlx += (AMI_AlignX[i] >> AMI_SHR_factor); prn_tlx += (AMI_MapTex[i].Usize>>1); prn_tlx -= disp_hw;
+         prn_tly = user_y; prn_tly += (AMI_AlignY[i] >> AMI_SHR_factor); prn_tly += (AMI_MapTex[i].Vsize>>1); prn_tly -= disp_hh;
          pbi_w = 0; prn_brx = disp_w; if(prn_tlx<0){ pbi_w += prn_tlx; prn_brx += prn_tlx; prn_tlx = 0;} if(prn_brx<=0) continue;
          pbi_h = 0; prn_bry = disp_h; if(prn_tly<0){ pbi_h += prn_tly; prn_bry += prn_tly; prn_tly = 0;} if(prn_bry<=0) continue;
-         pei_w = amd.MapTex[i].Usize - prn_tlx; pei_w -= disp_w; if(pei_w<0) prn_brx += pei_w; if(prn_brx<=0) continue;
-         pei_h = amd.MapTex[i].Vsize - prn_tly; pei_h -= disp_h; if(pei_h<0) prn_bry += pei_h; if(prn_bry<=0) continue;
-         tex.DrawTile(disp_ox-pbi_w, disp_oy-pbi_h, prn_brx,prn_bry, prn_tlx,prn_tly, prn_brx,prn_bry, amd.MapTex[i], true, pc);
+         pei_w = AMI_MapTex[i].Usize - prn_tlx; pei_w -= disp_w; if(pei_w<0) prn_brx += pei_w; if(prn_brx<=0) continue;
+         pei_h = AMI_MapTex[i].Vsize - prn_tly; pei_h -= disp_h; if(pei_h<0) prn_bry += pei_h; if(prn_bry<=0) continue;
+         tex.DrawTile(disp_ox-pbi_w, disp_oy-pbi_h, prn_brx,prn_bry, prn_tlx,prn_tly, prn_brx,prn_bry, AMI_MapTex[i], true, pc);
       }
+   }
+//------- radar targets ------------------------------------------------------------------
+   foreach allactors(class'pawn',p){  // copied from old render_areamap() variant
+      if(instr(caps(string(p.group)),"AERTARG") == -1 || p.health <= 0) continue;
+      hl_tmp = p.location;
+      hl_tmp -= owner_location;
+      hlx = (hl_tmp.x >> AMI_SHR_factor);
+      hly = (hl_tmp.y >> AMI_SHR_factor);
+      hlx+=126;
+      hly+=95; hly+=41;
+      if(hlx<2 || hlx>253 || hly<43 || hly>234) continue;
+      tex.DrawTile(hlx,hly,4,4, 0,0,4,4, texture'aerpixel', false, makecolor(255,120,120));
    }
 //------- player pos marker --------------------------------------------------------------
    pc = assign_presence_color(true,200,255,200);
@@ -1705,7 +1722,7 @@ function Timer(){
    do_forcefield_unspan();
    do_opertrig_forget();
    do_external_managers_poll();
-   if(radar_vqty>0){
+   if(radar_vqty>0){                    // override to battle mode, todo for areamap mb make this disableable
       decline_timer._unsnipe = level.timeseconds;
       snipe = true;
       do_shutdown_translator();
@@ -2447,9 +2464,7 @@ function level_setup(){
       FirePlayers[i] = spawn(class'AerGR_FP',,,location);
       if(FirePlayers[i]!=none){
          FirePlayers[i].setbase(self);
-//         FirePlayers[i].w = self;
       }
-//    broadcastmessage(FirePlayers[i]);
    }
 }
 
@@ -3065,9 +3080,31 @@ function pawn FindPawn(name t){
    return none;
 }
 
-function areamapdata FindAMD(){
-   local areamapdata a;
-   foreach allactors(class'areamapdata', a) return a;
+exec function sci_install_areamap(){
+   local info areamap;
+   local byte i,j,k;
+   areamap = FindAMD();
+   if (areamap==none) return;
+      self.SetPropertyText("AMI_DataStart",areamap.GetPropertyText("DataStart"));
+   k = 0; j = 0;
+   if(AMI_DataStart != 0) k = AMI_DataStart;
+   for(i=k;i<63;i++){
+      self.SetPropertyText("AMI_MapTex["$string(i)$"]",areamap.GetPropertyText("MapTex["$string(i)$"]"));
+      self.SetPropertyText("AMI_AlignX["$string(i)$"]",areamap.GetPropertyText("AlignX["$string(i)$"]"));
+      self.SetPropertyText("AMI_AlignY["$string(i)$"]",areamap.GetPropertyText("AlignY["$string(i)$"]"));
+      self.SetPropertyText("AMI_AlignZ["$string(i)$"]",areamap.GetPropertyText("AlignZ["$string(i)$"]"));
+      j++;
+   }
+      self.SetPropertyText("AMI_SHR_factor",areamap.GetPropertyText("SHR_factor"));
+      self.SetPropertyText("AMI_AreaHeight",areamap.GetPropertyText("AreaHeight"));
+   if(j > 0) ava_areamap = true;
+}
+
+function info FindAMD(){
+   local info a;
+   foreach allactors(class'info', a){
+     if(instr(caps(string(a.group)),"SCI_AREAMAP") != -1) return a;
+   }
    return none;
 }
 
@@ -3459,6 +3496,7 @@ defaultproperties{
    mwheel_trig=0
    ena_translator=false
    ena_areamap=false
+   ava_areamap=false
    last_scrollproc_updir=false
    aux_oper=4
    tds_oper=1
