@@ -8,7 +8,7 @@
 // for AER screen their layout must be set manually
 // Use ..\design\unr2txt.html to convert texts
 // =============================================
-class AerWk_TDS expands Translator;
+class AerWk_TDS extends Translator;
 var aerwpn w;
 var AerWk_THL TList;
 var bool pending_nosave;

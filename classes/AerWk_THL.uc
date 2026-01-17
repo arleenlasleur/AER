@@ -1,7 +1,7 @@
 // =============================================
 // Translator history list, ported from olextras
 // =============================================
-class AerWk_THL expands Actor;
+class AerWk_THL extends Actor;
 var aerwk_thl next;
 var aerwk_thl prev;
 var translatorevent msg_targ;

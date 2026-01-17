@@ -1,6 +1,4 @@
 class AerGr_FP extends Effects;
-#exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound"   // #3, slow rpm
-//#exec audio import file="sounds\aerfire_mtlkick.wav" name="aerfire" package="AER" group="Sound"   // #3, slow rpm
 var bool ena_playfire;
 
 function query_fire(){
@@ -11,6 +9,18 @@ function tick(float f){
    if(!ena_playfire) return;
    playsound(sound'aerfire', SLOT_None, 32);
    ena_playfire = false;
+}
+
+function timer(){
+   if(vsizesq(velocity) > 0) velocity = vect(0,0,0);
+}
+
+function beginplay(){
+   setTimer(0.3,true);
+}
+
+singular function zonechange(zoneinfo nz){
+   velocity = vect(0,0,0);
 }
 
 defaultproperties{

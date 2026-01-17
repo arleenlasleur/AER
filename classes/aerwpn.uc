@@ -1,11 +1,17 @@
 // ==============================================================================================================================
 // AER - Assault Electromagnetic Rifle, by Arleen Lasleur; orig. concept around Aug 2012, active dev since May 2023
    class aerwpn extends weapon config(aercfg);     // comments hist date format: YYYY-MM-DD
+
+   var bool glob_dbg_once; //debug
+struct tracebelt{ var pathnode tn[24];};
+var tracebelt tracesphere[24];
+
 //todo:
 //  trigger notify without dependency.
 //  exploding corpses setup info object
 //  trigger() func take action and destroy this object
 //  seems ok: snipe prevents transmsg_proximity. maybe show in red (test here: duskfall first corpse on rock, 2 brutes seen)
+// todo autoscope to 50m sole target, no impact on mousesens, only fast raytrace contour
 // ------------------------------------------------------------------------------------------------------------------------------
 // Weapon design points:              Ignored/not a goal:                  Integrated features:          Misc groups:
 //   - Upak CAR replacement             - not a RL/GL or heavy weapon        - translator
@@ -20,7 +26,7 @@
 //   Leftmouse:        always fire              2. All EOLs must be stripped          Mwheel: do selected
 //   Midmouse:         always laser pointer     Sample: see aer_setup()
 //   Alt (dodgekey):   dodge/light/swap FF      TE.Hint="AERLOCSIGN","AERNOSAVE","AERIDM"               Recomm. user.ini:
-//   Alt, WASD:        aux_oper alias           for location sign, nosave msgs or download
+//   Alt then WASD:    aux_oper alias           for location sign, nosave msgs or download
 // Aux operations:                              TE.Hint="AERIDM OVPS 5000" - override payload      [Engine.Input]
 //   LP (unselectable):    ST:                F1 F2:            VI: impact hammer (rmouse)         F1=AERToggleScreen
 //   laser pointer         stealth device     forcefields           sniper selector (mwheel)       F2=ActivateTranslator
@@ -199,17 +205,19 @@
 // firesounds
 //#exec audio import file="sounds\aerfire_mtlkick.wav" name="aerfire" package="AER" group="Sound"  // #1, hard
 
-//#exec audio import file="sounds\aerfire_legacyb.wav" name="aerfire_reload" package="AER" group="Sound"   // #3, slow rpm
-#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire_reload" package="AER" group="Sound"
-
+#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire" package="AER" group="Sound" //was pre26-01-11
+//..#exec audio import file="sounds\aerfire_legacyb.wav" name="aerfire_reload" package="AER" group="Sound"   // #3, slow rpm
+//#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire_reload" package="AER" group="Sound" //was pre26-01-11
+//..#exec audio import file="sounds\aerfire_impact.wav" name="aerfire" package="AER" group="Sound"   // #4, fast rpm, best
 //#exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound"   // #3, slow rpm
+
+//#exec audio import file="sounds\aerfire_boltdown.wav" name="aerfire" package="AER" group="Sound"
 //#exec audio import file="sounds\aerfire_zippo.wav" name="aerfire" package="AER" group="Sound"
-//#exec audio import file="sounds\aerfire_impact.wav" name="aerfire" package="AER" group="Sound"   // #4, fast rpm, best
-//#exec audio import file="sounds\aerfire_dart.wav" name="aerfire" package="AER" group="Sound"       // these two are RC for final prod
 
 #exec audio import file="sounds\aerlaseron.wav"  name="aerlaseron"  package="AER" group="Sound"
 #exec audio import file="sounds\aerlaseroff.wav" name="aerlaseroff" package="AER" group="Sound"
-#exec audio import file="sounds\aerpush_HBT.wav"     name="aerpush"     package="AER" group="Sound"
+//#exec audio import file="sounds\aerpush_HBT.wav"     name="aerpush"     package="AER" group="Sound"
+#exec audio import file="sounds\aerfire_dart.wav" name="aerpush" package="AER" group="Sound"
 #exec audio import file="sounds\aermshum.wav"    name="aermshum"    package="AER" group="Sound"
 #exec audio import file="sounds\aerffloop.wav"   name="aerffloop"   package="AER" group="Sound"
 #exec audio import file="sounds\aerffsta.wav"    name="aerffsta"    package="AER" group="Sound"
@@ -249,13 +257,18 @@ struct aertimers      {
     var float    _refire,     _reaim,      _unsnipe,    _unfeel,     _redodge,    _reammo,     _repower,  _hitsens,
                  _showmsg,    _hidemsg,    _dlmsg,      _reclick,    _unwarnom,   _unwarnaux,  _repush,   _readvhello,
                  _rescan,     _releash,    _refeature,  _clrpenmon,  _unspanff,   _reffsta[2], _sh_cap,   _sh_dmgdec,
-                 _redisch,    _rechrg,     _unobj,      _untrig,     _rerssi,     _initscan; };
+                 _redisch,    _rechrg,     _unobj,      _untrig,     _rerssi,     _initscan,   _reaz_in,  _reaz_out; };
 var bool                ava_synth, boost_power;     // faster flags todo replace 'boost_power' with int powersrc_level
 var bool                bZoomScreen;
 var aertimers           decline_timer;
 var float               last_firetime;
-var float               initial_mousesens;
-var int                 range,    range_targ,    initial_fov,    zoomfactor,    newfov;
+var float               initial_mousesens,
+                        initial_fov, // pawn fov when pickup
+                        newfov,      // manual zoom fov
+                        auto_newfov, // desired
+                        auto_oldfov, // previous setfov
+                        auto_setfov; // nowset autozoom fov
+var int                 range, range_targ, zoomfactor, auto_zoomfactor, old_auto_zoomfactor;
 // --- onetap dodge --------------------------------------------------------------------------------------------------------
 var globalconfig bool   InfiniteDodge;
 var globalconfig string MapForceDodgeKeyName;
@@ -272,16 +285,16 @@ var globalconfig bool   InfiniteAmmo;
 //const                   BaseScrollInterval     = 0.085;
 //const                   BaseFireInterval       = 0.158; // 380 RPM     2025-07-27
 //const                   BaseScrollInterval     = 0.079;
-//const /* lowest */      BaseFireInterval       = 0.142; // 420 RPM     2025-07-20
-//const                   BaseScrollInterval     = 0.071;
+const /* lowest */      BaseFireInterval       = 0.142; // 420 RPM     2025-07-20
+const                   BaseScrollInterval     = 0.071;
 // //  const                   BaseFireInterval       = 0.132; // 450 RPM     2025-06-22
 // //  const                   BaseScrollInterval     = 0.066;
   /* =============================================================================
    todo NEW SPEED DATA:
    ALL firespeeds below are conflicting btw goofing reload sound, prefer to use upper.
    ============================================================================= */
-const                   BaseFireInterval       = 0.124; // 483 RPM     2025-07-07
-const                   BaseScrollInterval     = 0.062;
+//.const                 BaseFireInterval       = 0.124; // 483 RPM     2025-07-07       // was pre26-01-11
+//const                 BaseScrollInterval     = 0.062;
 //const /* highest */     BaseFireInterval       = 0.114; // 526 RPM     unkn         THESE VARS ARE IDEAL
 //const                   BaseScrollInterval     = 0.057; //                             DO NOT TOUCH.
 //const                   BaseFireInterval       = 0.110; // 545 RPM     2025-08-03
@@ -289,7 +302,7 @@ const                   BaseScrollInterval     = 0.062;
 //const /**/              BaseFireInterval       = 0.094; // 640 RPM     2025-02-01
 //const                   BaseScrollInterval     = 0.047;
 //const                   BaseFireInterval       = 0.090; // 666 RPM     2025-07-27
-///const                   BaseScrollInterval     = 0.045;
+//const                   BaseScrollInterval     = 0.045;
 //const                   BaseFireInterval       = 0.074; // 810 RPM     2025-04-22  shit
 //const                   BaseScrollInterval     = 0.037;
 
@@ -394,6 +407,8 @@ var radar_data          radar[radar_max];             // pivot aiming
 struct radarlock_data { var int   x[8], y[8]; };      // these 8 are for t1t2t3t4 b1b2b3b4 dots of collisionbox, not eight targs!
 var radarlock_data      radarlock[radar_max];         // collision box aiming
 var bool                ignore_hitsens_trig, ignore_hitsens_rst;
+var transient array<vector> meshverts;
+var pawn surelock_victim;
 // --- areamap -------------------------------------------------------------------------------------------------------------
 var bool ava_areamap;                                 // area intel is known for current level
 var byte AMI_DataStart;                               // from where to copy data, used for discoverable multiple maps
@@ -719,7 +734,10 @@ simulated event RenderTexture(ScriptedTexture Tex){
       if(pw_sens_altfire && !ena_fast_shield && (pc.g>=36 && pc.b>=36)) pc = makecolor(255,255,255);
       if(radar[i].hit) pc = (tmp_byte==1) ? makecolor(255,255,32) : makecolor(64,64,255);
       if(low_batt || ena_invis) pc = lowbatt_color(pc);
-      for(j=0;j<8;j++) tex.DrawTile(radarlock[i].x[j],radarlock[i].y[j],4,4, 0,0,4,4, texture'aerpixel', false, pc );
+
+//    for(j=0;j<8;j++) tex.DrawTile(radarlock[i].x[j],radarlock[i].y[j],4,4, 0,0,4,4, texture'aerpixel', false, pc );
+      render_pawn_contour(tex,FindPawn(radar[i].t));  // only renders first mesh frame, without animframe
+
 //    2024-04-27: lines enclosing abounds to wirefrime box. shit, rendered glitchy
 //    for(j=0;j<4;j++){  tmp_byte = j==3 ? 0 : j+1;  connect_dotpair(tex,i,j,tmp_byte,pc);connect_dotpair(tex,i,j,j+4,pc);  }
 //    for(j=4;j<8;j++){  tmp_byte = j==7 ? 4 : j+1;  connect_dotpair(tex,i,j,tmp_byte,pc);  }
@@ -1011,6 +1029,9 @@ simulated event RenderTexture(ScriptedTexture Tex){
 
 function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
    local playerpawn p;
+   local pawn pt;         // from
+   local vector hl_tmp;   //  old
+   local int hlx,hly;     // code
    local float rotr;  // radians rotation
    local float user_z;
    local int   disp_w,   disp_h,   // screen vars, full w/h
@@ -1063,9 +1084,9 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
       }
    }
 //------- radar targets ------------------------------------------------------------------
-   foreach allactors(class'pawn',p){  // copied from old render_areamap() variant
-      if(instr(caps(string(p.group)),"AERTARG") == -1 || p.health <= 0) continue;
-      hl_tmp = p.location;
+   foreach allactors(class'pawn',pt){  // copied from old render_areamap() variant
+      if(instr(caps(string(pt.group)),"AERTARG") == -1 || pt.health <= 0) continue;
+      hl_tmp = pt.location;
       hl_tmp -= owner_location;
       hlx = (hl_tmp.x >> AMI_SHR_factor);
       hly = (hl_tmp.y >> AMI_SHR_factor);
@@ -1081,6 +1102,93 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
    nmarker = byte(rotr/2730.66);
    tex.DrawTile(119,129,16,16, nmarker*16,0, 16,16, texture'aerbearing', true, pc);    
 }
+
+function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime raytracing areamap, don't need data actors, slower
+   local vector x,y,z,xv,yv,zv;
+   local rotator r;
+   local int i,k;
+   local color pc;
+   local vector ctr_l,hit_n,ctr_etr; // contour trace location
+   local vector dir;
+   local actor atarg;
+   local int xp, yp;
+
+//   foreach allactors(class'pawn',targ) if(targ.isa('brute')) break;
+
+   r = rotator(owner.location - targ.location);
+   getaxes(pawn(owner).viewrotation, xv, yv, zv);
+   if(auto_setfov == 0) auto_setfov = UserSetFOV;  // todo make this automatic. calc necess fov from clipx/clipy ratio
+   if(!glob_dbg_once){
+
+      if(!targ.mesh) return;
+      targ.allframeverts(meshverts);
+
+//    for(i=(MeshVerts.Size()-1);i>=0;--i){
+      for(i=0;i<meshverts.size();i++){
+//    for(k=0;k<24;k++){
+//       for(i=0;i<12;i++){
+//          getaxes(r,x,y,z);
+//          ctr_etr = targ.location+(targ.collisionradius+28)*x;
+         // spawn(class'AerGr_laser',,,ctr_etr); // once
+//          atarg = trace(ctr_l,hit_n,targ.location,ctr_etr,true,vect(0,0,0),false);
+         // if(atarg.name != targ.name) continue;
+            dir = meshverts[i] - owner.location;
+//          dir = ctr_l - owner.location;
+            dir /= vsize(dir);
+            if((dir dot xv) < 0.7) continue;
+            pc = makecolor(120,120,153);   // 200 200 255 too bright              // primary: white color
+            if(targ == surelock_victim) pc = makecolor(200,255,200);              // secondary: surelock color
+            if(!fasttrace(meshverts[i],owner.location)) pc = makecolor(75,75,96); // tertiary: behindwall color
+//          if(!fasttrace(targ.location,owner.location)) pc = makecolor(255,25,25);
+            xp = ( (dir dot yv)) * (clipxdiv2 / tan(auto_setfov * pi / 360)) / (dir dot xv);
+            yp = (-(dir dot zv)) * (clipxdiv2 / tan(auto_setfov * pi / 360)) / (dir dot xv);
+            xp += scale128;
+            yp += scale128;
+            xp = int(xp/scale1);
+            yp = int(yp/scale1);
+          // if(xp<5 || xp>251 || yp<15 || yp>245) continue;
+          // ***************************
+          //    if(pw_sens_altfire && !ena_fast_shield && (pc.g>=36 && pc.b>=36)) pc = makecolor(255,255,255);
+          //    if(radar[i].hit) pc = (tmp_byte==1) ? makecolor(255,255,32) : makecolor(64,64,255);
+          //    if(low_batt || ena_invis) pc = lowbatt_color(pc);
+            tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
+          // ***************************
+//          r.yaw += 2730.666;
+//       }
+//       r.yaw = 0.0;
+//       r.pitch += 2730.666;
+      }
+         // glob_dbg_once = true;
+   }
+   // *************************** unused
+
+ /*  for(i=0;i<4;i++){
+      pn = PawnContourScanners[i];
+      r = rotator(pn.location - targ.location);
+      r.pitch -= 8192;
+      pn.setrotation(r);
+      pc = makecolor(200,200,255);
+      hl = owner_location;
+      hl_tmp = hl;
+      for(i=0;i<16;i++){ // was 16 for livescan
+         tc = pc; // save thisheight color
+         getaxes(r,x,y,z); endtrace = pn.location + 512.0 * x;
+         trace(hl,hn,endtrace,pn.location,true);  // todo determine mover
+         // if(mover) tc = red;
+         hl_tmp = hl;
+//         hl_tmp -= owner_location;
+         hlx = (hl_tmp.x >> 2);  // 3=zoomin 1072 xmax pn, 5=zoomout 4288 xmax
+         hly = (hl_tmp.y >> 2);
+//         hlx /= _scroll; hly /= _scroll;  // variable zoom
+//         hlx+=64; // was 128; // what are these?
+         hly+=97; hly+=41;
+         if(hlx<0 || hlx>255 || hly<41 || hly>236) continue;
+         tex.DrawTile(hlx,hly,1,1, 0,0,4,4, texture'aerpixel', false, tc);
+         r.yaw+=1024;   // was 1365, 48 rays/2pi; rays = 65536/yawdelta
+      }
+   }  */
+}
+
 
 function render_areamap(scriptedtexture tex){   // realtime raytracing areamap, don't need data actors, slower
    local vector x,y,z,endtrace,hl,hn,hl_tmp;
@@ -1321,6 +1429,9 @@ function TweenDown(){
    collapse_shield();
    if(playerpawn(owner) == none) return;
    newfov = initial_fov;
+   auto_newfov = initial_fov;
+   auto_oldfov = initial_fov;
+   auto_setfov = initial_fov;
    playerpawn(owner).mousesensitivity = initial_mousesens;
    ambientsound=none;
 }
@@ -1444,7 +1555,7 @@ function postrender(canvas c){
    if(canvas_finfo == none) return;
    c.font = canvas_finfo.GetCanvasFont();
    return;
-   c.setpos(100,100);
+   c.setpos(100,70);
 //   debugstr = "hello";
    c.drawtext("Debug: "$debugstr);
 }
@@ -1747,7 +1858,7 @@ function do_tick_carry_laser(){
    local float lasermult, laserdist;
    local vector laserorigin;
    local actor atarg_pri,atarg_sec;
-   local pawn ptarg;
+   local pawn ptarg,tmp_surelock_victim;
    local bool targ_is_ffield,
               targ_is_hdm,
               targ_is_thdm;
@@ -1778,19 +1889,27 @@ function do_tick_carry_laser(){
    targ_is_thdm = (instr(caps(string(atarg_pri.group)),"AERTBLOCK") != -1);
    hdmlock = targ_is_hdm && ena_laser;
    tmp_surelock = false;
+   tmp_surelock_victim = none;
    ptarg = pawn(atarg_pri);
    if(ptarg != none){
-      if(instr(caps(string(ptarg.group)),"AERTARG") != -1) tmp_surelock = true;
+      if(instr(caps(string(ptarg.group)),"AERTARG") != -1){
+         tmp_surelock = true;
+         tmp_surelock_victim = ptarg;
+      }
       if(ena_laser) attempt_tag_target(ptarg); // 2024-04-28: only tag by laser, returned 2024-12-05
       // todo override if(ena_laser) for small nastypawns (make isA func for them)
    }
    ptarg = pawn(atarg_sec);
    if(ptarg != none){
-      if(instr(caps(string(ptarg.group)),"AERTARG") != -1) tmp_surelock = true;
+      if(instr(caps(string(ptarg.group)),"AERTARG") != -1){
+         tmp_surelock = true;
+         tmp_surelock_victim = ptarg;
+      }
       if(ena_laser && !targ_is_hdm && !targ_is_thdm) attempt_tag_target(ptarg); // 2025-01-07: only first laser tags, only thru non-HDM
    }
    if(!ena_laser) tmp_surelock = false;
    surelock = tmp_surelock;          // minimize time amount while this being changed
+   surelock_victim = tmp_surelock_victim;
    hitloc -= x*7;
    hitlocsec -= x*7;
    laserdist = vsize(owner_location - hitloc);
@@ -1846,6 +1965,17 @@ function do_carry_particle_lasers(){
 
 }
 
+function do_tick_carry_fireplayers(){
+   local byte i;
+   for(i=0;i<3;i++){
+      if(FirePlayers[i]!=none) continue;
+      if(vsize(owner_location - FirePlayers[i].location) <= 64.0) continue;
+      FirePlayers[i].setlocation(owner_location);
+      FirePlayers[i].setbase(self);
+   }
+}
+
+
 function do_leash_laser(){
    if(!ena_laser) return;
    if(level.timeseconds - decline_timer._releash <= 2.0) return;
@@ -1899,6 +2029,76 @@ function do_tick_altfire_set(playerpawn p){          // bug: rmouse slows down c
    if(priorange > 7733) zoomfactor=9;
    newFOV = fclamp(UserSetFOV/zoomfactor, 8.0, UserSetFOV);     // was 12.5
    p.mousesensitivity = initial_mousesens/(UserSetFOV/newfov);
+}
+
+function do_tick_decide_autozoom(){
+   local int priorange;
+   local float fov_offset;
+
+    local float x, angle, b;
+
+    old_auto_zoomfactor = auto_zoomfactor;
+   auto_zoomfactor = 10;
+//   priorange = !surelock ? range_targ : range;
+   priorange = range;
+/*   if(priorange > 520)  auto_zoomfactor=2;
+   if(priorange > 690)  auto_zoomfactor=3;
+   if(priorange > 1130) auto_zoomfactor=4;
+   if(priorange > 1673) auto_zoomfactor=5;
+   if(priorange > 2400) auto_zoomfactor=6;
+   if(priorange > 3700) auto_zoomfactor=7;
+   if(priorange > 5446) auto_zoomfactor=8;
+   if(priorange > 7733) auto_zoomfactor=9; */
+
+   /*
+    65:   ;   73:   ;   81:   ;   90:   ;   98:   ;  106:   ;  117:   ;  133:   ;  148:   ;  163:  0
+ 179:  1;  194:  2;  210:  3;  225:  4;  241:  5;  256:  6;  272:  7;  290:  8;  313:  9;  335: 10
+ 358: 11;  381: 12;  404: 13;  427: 14;  450: 15;  472: 16;  495: 17;  518: 18;  547: 19;  577: 20
+ 608: 21;  639: 22;  670: 23;  700: 24;  731: 25;  762: 26;  793: 27;  824: 28;  858: 29;  898: 30
+ 937: 31;  977: 32; 1016: 33; 1055: 34; 1095: 35; 1134: 36; 1174: 37; 1213: 38; 1259: 39; 1309: 40
+1358: 41; 1407: 42; 1456: 43; 1505: 44; 1554: 45; 1604: 46; 1653: 47; 1708: 48; 1769: 49; 1829: 50
+1889: 51; 1950: 52; 2010: 53; 2071: 54; 2131: 55; 2193: 56; 2267: 57; 2341: 58; 2414: 59; 2488: 60
+2562: 61; 2636: 62; 2710: 63; 2791: 64; 2881: 65; 2972: 66; 3062: 67; 3153: 68; 3243: 69; 3334: 70
+3483: 71; 3550: 72; 3662: 73; 3774: 74; 3887: 75; 3999: 76; 4134: 77; 4276: 78; 4419: 79; 4561: 80
+4704: 81; 4886: 82; 5075: 83; 5263: 84; 5453: 85; 5723: 86; 5992: 87; 6306: 88; 6761: 89; 7733: 90
+   */
+
+    if(priorange < 335){
+       auto_zoomfactor = 10;
+       goto ready_autonewzoom;
+    }
+    if(priorange > 11000){
+       auto_zoomfactor = 90;
+       goto ready_autonewzoom;
+    }
+    
+    x = float(priorange - 179) / float(11000 - 179); // normalize
+    x = x ** 0.4;                // curvature adjustment
+    angle = x * (Pi / 2.0);      // map to sin() domain
+    b = 1.0 + 89.0 * sin(angle); // get value + scale
+    auto_zoomfactor = int(b + 0.5);
+    ready_autonewzoom:
+
+   if(old_auto_zoomfactor < auto_zoomfactor){
+      auto_zoomfactor = old_auto_zoomfactor;
+      auto_zoomfactor++;
+   }else if(old_auto_zoomfactor > auto_zoomfactor){
+      auto_zoomfactor = old_auto_zoomfactor;
+      auto_zoomfactor--;
+   } 
+//   fov_offset = 1.0 / priorange;
+//   auto_newfov = fclamp((UserSetFOV*10)/auto_zoomfactor, 8.0, UserSetFOV);
+
+   auto_oldfov = auto_setfov;
+   if(level.timeseconds - decline_timer._reaz_in > 0.030){
+      decline_timer._reaz_in = level.timeseconds;
+//      if(auto_oldfov > auto_newfov) auto_setfov -= 0.1;
+      auto_setfov = fclamp((UserSetFOV*10)/auto_zoomfactor, 8.0, UserSetFOV);
+   }
+/*   if(level.timeseconds - decline_timer._reaz_out > 0.020){
+      decline_timer._reaz_out = level.timeseconds;
+      if(auto_oldfov < auto_newfov) auto_setfov += 0.1;
+   } */
 }
 
 function do_tick_shield_capacitor(){
@@ -2233,14 +2433,17 @@ function tick(float f){
    if(!ena_render_scope) return;
    pw_sens_crouch = p.bIsCrouching;
    do_tick_scan_rssi();
+   debugstr = string(auto_setfov);
    if(!ena_invis) goto skip_invis;
    for(pt=level.pawnlist; pt!=none; pt=pt.nextpawn) if(pt.enemy == p) pt.enemy = none;  // todo slowdown it by fadetime 0.6
    skip_invis:
    if(p.weapon == self){
       do_tick_carry_laser();
+      do_tick_carry_fireplayers();
       do_tick_query_fire(p.bFire==0, p.bAltFire==0);
 //    if(surelock) do_tick_query_fire(false, p.bAltFire==0); // todo and check autofire
       do_tick_altfire_set(p);
+      do_tick_decide_autozoom();
    }
 // if(aux_oper==1 || aux_oper==2) goto skip_shield;     // 2024-08-20: now always executed
    do_tick_shield();
@@ -2300,7 +2503,8 @@ state Idle{
 //    pawn(Owner).PlayRecoil(1);                       // NFI purpose of this. old code
       if(!entering_setup && ena_setup) return true;
       if(owner == none) return true;
-      owner.playsound(sound'aerfire_reload', SLOT_None, 32);
+//      owner.playsound(sound'aerfire_reload', SLOT_None, 32);
+      owner.playsound(sound'aerfire', SLOT_None, 32);
       for(i=0;i<3;i++){
 //         if(FirePlayers[i]!=none) FirePlayers[i].query_fire();  // 2026-01-11: disabled
       }
@@ -2458,13 +2662,14 @@ function level_setup(){
    assign_spawn_notify('skproj'); // todo use small projs for skaarjrifle, keep regular skjscouts as usual
    prohibit_conventional_weapons();
    foreach allactors(class'decoration',d) d.bUseMeshCollision=true;
-   foreach allactors(class'pawn',p) p.bUseMeshCollision=true;
+   foreach allactors(class'pawn',p){
+      p.bUseMeshCollision=true;
+      p.bAnimByOwner=true;
+   }
    for(i=0;i<3;i++){
       if(FirePlayers[i]!=none) continue;
       FirePlayers[i] = spawn(class'AerGR_FP',,,location);
-      if(FirePlayers[i]!=none){
-         FirePlayers[i].setbase(self);
-      }
+      if(FirePlayers[i]!=none) FirePlayers[i].setbase(self);
    }
 }
 
@@ -2986,10 +3191,10 @@ function query_laser(bool newstate, bool notifysound){
 }
 
 exec function aerforcedodge(){
-   local playerpawn p;            // required. pawns do not have bWASD controller memory
+   local playerpawn p;            // required. nonplayer pawns do not have bWASD controller memory
    p = playerpawn(owner);
    if(p == none) return;
-   if(p.weapon != self) return;   // no validate_owner_toggle() call bc we need p anyway
+   if(p.weapon != self) return;   // no validate_owner_toggle() call because we need p anyway
    xdir = 0;
    ydir = 0;
    if(p.bwasforward) xdir = 1;
@@ -3444,6 +3649,7 @@ defaultproperties{
    bZoomScreen=false
    range=0
    zoomfactor=1
+   auto_zoomfactor=1
    initial_fov=0
    newFOV=0
    xdir=0
@@ -3524,6 +3730,7 @@ defaultproperties{
    DisableHitsens=false
    anylock=false
    surelock=false
+   surelock_victim=None
    hdmlock=false
    low_batt=false
    fired=false
