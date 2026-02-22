@@ -422,7 +422,8 @@ defaultproperties{
         Style=STY_Translucent
         SoundRadius=128
         SoundVolume=140
-        Physics=PHYS_Swimming
+        Physics=PHYS_MovingBrush
+        PhysRate=9999.0
         LightType=LT_Steady
         LightEffect=LE_Shock
         LightBrightness=255

@@ -42,6 +42,8 @@ singular function zonechange(zoneinfo nz){
 }
 
 defaultproperties{
+   Physics=PHYS_MovingBrush
+   PhysRate=9999.0
    range=2000.0
    ScaleGlow=3.0
    Mesh=Mesh'AER.aerlaserblast'

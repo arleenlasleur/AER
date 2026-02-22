@@ -7,7 +7,7 @@ function query_fire(){
 
 function tick(float f){
    if(!ena_playfire) return;
-   playsound(sound'aerfire', SLOT_None, 32);
+//   playsound(sound'aerfire', SLOT_None, 32);
    ena_playfire = false;
 }
 
@@ -24,5 +24,7 @@ singular function zonechange(zoneinfo nz){
 }
 
 defaultproperties{
+   Physics=PHYS_MovingBrush
+   PhysRate=9999.0
    ena_playfire=false
 }

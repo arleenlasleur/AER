@@ -1,10 +1,14 @@
 // ==============================================================================================================================
 // AER - Assault Electromagnetic Rifle, by Arleen Lasleur; orig. concept around Aug 2012, active dev since May 2023
-   class aerwpn extends weapon config(aercfg);     // comments hist date format: YYYY-MM-DD
+// ==============================================================================================================================
+// todo autoincrease projspeed, proj starts with visible slow speed + mb mesh, go to 12000+ speed after short delay, +sonic break snd
 
+   class aerwpn extends weapon config(aercfg);     // comments hist date format: YYYY-MM-DD
+// bug strange autozoom behavior with fastshield // upd, this is normal due to range behavior
+// mb bug: false positive query_push while holding altfire, not pressing. dead mouse btn?
+
+//bug: fastshield should show always because not only do_chg_cap eats it.
    var bool glob_dbg_once; //debug
-struct tracebelt{ var pathnode tn[24];};
-var tracebelt tracesphere[24];
 
 //todo:
 //  trigger notify without dependency.
@@ -205,11 +209,14 @@ var tracebelt tracesphere[24];
 // firesounds
 //#exec audio import file="sounds\aerfire_mtlkick.wav" name="aerfire" package="AER" group="Sound"  // #1, hard
 
-#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire" package="AER" group="Sound" //was pre26-01-11
+//#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire" package="AER" group="Sound" //was pre2026-01-17
+//#exec audio import file="sounds\aerfire_impact.wav" name="aerfire" package="AER" group="Sound" // 2026-01-17
+//#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire" package="AER" group="Sound" // 2026-01-17
 //..#exec audio import file="sounds\aerfire_legacyb.wav" name="aerfire_reload" package="AER" group="Sound"   // #3, slow rpm
-//#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire_reload" package="AER" group="Sound" //was pre26-01-11
+#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire_reload" package="AER" group="Sound" //was pre2026-01-11
 //..#exec audio import file="sounds\aerfire_impact.wav" name="aerfire" package="AER" group="Sound"   // #4, fast rpm, best
-//#exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound"   // #3, slow rpm
+
+#exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound"   // #3, slow rpm
 
 //#exec audio import file="sounds\aerfire_boltdown.wav" name="aerfire" package="AER" group="Sound"
 //#exec audio import file="sounds\aerfire_zippo.wav" name="aerfire" package="AER" group="Sound"
@@ -283,17 +290,17 @@ var globalconfig bool   InfiniteAmmo;
 //const                   BaseScrollInterval     = 0.093;
 //const                   BaseFireInterval       = 0.170; // 352 RPM     2025-09-23
 //const                   BaseScrollInterval     = 0.085;
-//const                   BaseFireInterval       = 0.158; // 380 RPM     2025-07-27
-//const                   BaseScrollInterval     = 0.079;
-const /* lowest */      BaseFireInterval       = 0.142; // 420 RPM     2025-07-20
-const                   BaseScrollInterval     = 0.071;
+const   /* lowest */    BaseFireInterval       = 0.158; // 380 RPM     2025-07-27
+const                   BaseScrollInterval     = 0.079;
+//const                   BaseFireInterval       = 0.142; // 420 RPM     2025-07-20
+//const                   BaseScrollInterval     = 0.071;
 // //  const                   BaseFireInterval       = 0.132; // 450 RPM     2025-06-22
 // //  const                   BaseScrollInterval     = 0.066;
   /* =============================================================================
    todo NEW SPEED DATA:
    ALL firespeeds below are conflicting btw goofing reload sound, prefer to use upper.
    ============================================================================= */
-//.const                 BaseFireInterval       = 0.124; // 483 RPM     2025-07-07       // was pre26-01-11
+//.const                 BaseFireInterval       = 0.124; // 483 RPM     2025-07-07       // was pre2026-01-11
 //const                 BaseScrollInterval     = 0.062;
 //const /* highest */     BaseFireInterval       = 0.114; // 526 RPM     unkn         THESE VARS ARE IDEAL
 //const                   BaseScrollInterval     = 0.057; //                             DO NOT TOUCH.
@@ -320,7 +327,7 @@ var travel int          power_chg, ammo_chg, batt_chg, synth_chg;  // override s
 struct penmon_entry   { var byte    _rem,  _full,  _admg; };
 const                   penmon_capacity = 140;
 var penmon_entry        penetrability_monitor[penmon_capacity];
-var AerGr_FP            FirePlayers[3];
+var AerGr_FP            FirePlayers[5];
 // --- battery related -----------------------------------------------------------------------------------------------------
 const                   batt_full              = 140000;
 const                   batt_clip              = 14000;
@@ -339,6 +346,7 @@ var byte                state_forcefield[2];
 var byte                dist_field[2];
 var triggers            sensed_forcefield_attractor;
 var travel bool         ena_fast_shield;
+var travel bool         ava_fast_shield;
 var travel int          fast_shield_chg;
 var byte                populated_shield_dmg;
 var byte                incoming_danger;
@@ -415,7 +423,7 @@ var byte AMI_DataStart;                               // from where to copy data
 var texture AMI_MapTex[63];                           // payload
 var int AMI_AlignX[63],AMI_AlignY[63],AMI_AlignZ[63]; // align
 var byte AMI_SHR_factor;                              // bitshift factor (pixel to uu scale)
-var float AMI_AreaHeight;                             // AreaZ height if other than 128
+var float AMI_FloorHeight;                             // AreaZ height if other than 128
 // --- compass mark related ------------------------------------------------------------------------------------------------
 var vector              pos_objective;
 var bool                ava_objective,
@@ -843,8 +851,11 @@ simulated event RenderTexture(ScriptedTexture Tex){
          tex.DrawTile(0+tmp_byte+populated_shield_dmg,237,1,1, 0,0,4,4, texture'aerpixel', false, pc);
       }
    }else{
-      tmp_bool = ((int(level.timeseconds*10) % 20) >= 4);
-      pc = tmp_bool ? makecolor(255,100,100) : makecolor(255,255,255);
+      if(ava_fast_shield){               // 2026-01-18: disabled, 2026-02-22: blink only of sniper/shield mode selectable
+         tmp_bool = ((int(level.timeseconds*10) % 20) >= 4);
+         pc = tmp_bool ? makecolor(255,100,100) : makecolor(255,255,255);
+      }
+      pc = assign_presence_color(true, 100,100,132);  // 2026-01-18
       if(low_batt || ena_invis) pc = lowbatt_color(pc);
       tex.DrawTile(0,237,255,1, 0,0,4,4, texture'aerpixel', false, pc);
    }
@@ -902,8 +913,20 @@ simulated event RenderTexture(ScriptedTexture Tex){
    if(!ena_cloak) goto skip_cd_stat;
    pc = assign_state_color(ena_invis,             ava_invis, 200,200,255);              tex.drawcoloredtext(221,     239,"ST",font'aerfontsma',pc);
    skip_cd_stat:
-   pc = assign_state_color(level.timeseconds - decline_timer._repush < PushInterval,
-                                                  true,      255,255,160);               tex.drawcoloredtext(239,     239,"VI",font'aerfontsma',pc);
+/* pc = assign_state_color(level.timeseconds - decline_timer._repush < PushInterval,  // old code
+                                                  true,      255,255,160);               tex.drawcoloredtext(239,     239,"VI",font'aerfontsma',pc); */
+// --------  2026-01-18  --------------------------------------------------------------------------------
+   pc = makecolor(200,200,255);
+   tmp_string = "SM";
+   if(ena_fast_shield) tmp_string = "FS";
+   if(!ava_fast_shield) pc = makecolor(220,200,200);
+   if(level.timeseconds - decline_timer._repush < PushInterval){
+      pc = makecolor(255,255,160);
+      tmp_string = "VI";
+   }
+   tex.drawcoloredtext(239, 239,tmp_string,font'aerfontsma',pc);
+// ------------------------------------------------------------------------------------------------------
+
    pc = assign_presence_color(true,200,200,255);
    d = level.timeseconds - decline_timer._reclick;                              // shithack, d was used above
    if(pw_sens_altfire && d >= RClickChgModeMin && d < RClickChgModeMax)       pc = assign_presence_color(true,255,0,0);
@@ -1068,9 +1091,9 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
       for(i=0;i<63;i++){                                   // todo mb 1st pass show tex[0], then single z-match. less drawcalls
                                                            // todo  reqiure merged tex for these coords, or "single z" indicator
          if(AMI_MapTex[i] == none) continue;  // mb break here
-         user_z = p.location.z % AMI_AreaHeight;
+         user_z = p.location.z % AMI_FloorHeight;
          user_z = p.location.z - user_z;
-         is_relevant = (abs(user_z - AMI_AlignZ[i]) <= AMI_AreaHeight);
+         is_relevant = (abs(user_z - AMI_AlignZ[i]) <= AMI_FloorHeight);
          if(!dimmed_bg && !is_relevant) continue;
          user_x = int(p.location.x) >> AMI_SHR_factor;
          user_y = int(p.location.y) >> AMI_SHR_factor;
@@ -1117,7 +1140,7 @@ function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime rayt
 
    r = rotator(owner.location - targ.location);
    getaxes(pawn(owner).viewrotation, xv, yv, zv);
-   if(auto_setfov == 0) auto_setfov = UserSetFOV;  // todo make this automatic. calc necess fov from clipx/clipy ratio
+   if(newfov == 0) newfov = UserSetFOV;  // todo make this automatic. calc necess fov from clipx/clipy ratio
    if(!glob_dbg_once){
 
       if(!targ.mesh) return;
@@ -1140,8 +1163,8 @@ function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime rayt
             if(targ == surelock_victim) pc = makecolor(200,255,200);              // secondary: surelock color
             if(!fasttrace(meshverts[i],owner.location)) pc = makecolor(75,75,96); // tertiary: behindwall color
 //          if(!fasttrace(targ.location,owner.location)) pc = makecolor(255,25,25);
-            xp = ( (dir dot yv)) * (clipxdiv2 / tan(auto_setfov * pi / 360)) / (dir dot xv);
-            yp = (-(dir dot zv)) * (clipxdiv2 / tan(auto_setfov * pi / 360)) / (dir dot xv);
+            xp = ( (dir dot yv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
+            yp = (-(dir dot zv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
             xp += scale128;
             yp += scale128;
             xp = int(xp/scale1);
@@ -1278,7 +1301,7 @@ function do_tick_scan_rssi(){
    }
    if(pn_act==none && pn!=none) pn_act = pn;
    if(pn_act==none) return;
-   modem_rssi = byte(right(string(pn_act.group),1));   // group named rssi0-rssi6
+   modem_rssi = byte(right(string(pn_act.group),1));   // group named rssi0-rssi6 // todo change this to rssi1-rssi255
 }
 
 function rendersnow(scriptedtexture tex){
@@ -1967,7 +1990,7 @@ function do_carry_particle_lasers(){
 
 function do_tick_carry_fireplayers(){
    local byte i;
-   for(i=0;i<3;i++){
+   for(i=0;i<5;i++){
       if(FirePlayers[i]!=none) continue;
       if(vsize(owner_location - FirePlayers[i].location) <= 64.0) continue;
       FirePlayers[i].setlocation(owner_location);
@@ -1980,15 +2003,15 @@ function do_leash_laser(){
    if(!ena_laser) return;
    if(level.timeseconds - decline_timer._releash <= 2.0) return;
    decline_timer._releash = level.timeseconds;
-   if(laserdot == none || laserdotsec == none){  // laser isn't exist while must be
-      query_laser(false,false);                  // ctrl alt del this fucker
+   if(laserdot == none || laserdotsec == none){ // laser isn't exist while must be
+      query_laser(false,false);                 // ctrl alt del this fucker
       if(ava_laser) query_laser(true,false);
       return;
    }
-   if(laserdot.physics == PHYS_None && laserdotsec.physics == PHYS_None) return;
-   laserdot.setPhysics(PHYS_None);               // workaround unwanted zonevelocity inheritance
+   if(laserdot.physics == PHYS_MovingBrush && laserdotsec.physics == PHYS_MovingBrush) return;
+   laserdot.setPhysics(PHYS_MovingBrush);       // workaround unwanted zonevelocity inheritance
    laserdot.velocity = vect(0,0,0);
-   laserdotsec.setPhysics(PHYS_None);
+   laserdotsec.setPhysics(PHYS_MovingBrush);
    laserdotsec.velocity = vect(0,0,0);
 }
 
@@ -2028,7 +2051,7 @@ function do_tick_altfire_set(playerpawn p){          // bug: rmouse slows down c
    if(priorange > 5446) zoomfactor=8;
    if(priorange > 7733) zoomfactor=9;
    newFOV = fclamp(UserSetFOV/zoomfactor, 8.0, UserSetFOV);     // was 12.5
-   p.mousesensitivity = initial_mousesens/(UserSetFOV/newfov);
+//   p.mousesensitivity = initial_mousesens/(UserSetFOV/newfov);
 }
 
 function do_tick_decide_autozoom(){
@@ -2039,8 +2062,11 @@ function do_tick_decide_autozoom(){
 
     old_auto_zoomfactor = auto_zoomfactor;
    auto_zoomfactor = 10;
-//   priorange = !surelock ? range_targ : range;
-   priorange = range;
+   if(!pw_sens_altfire) goto ready_autonewzoom;
+
+//   priorange = surelock ? range_targ : range;
+//   priorange = range;
+   priorange = anylock ? range_targ : range;
 /*   if(priorange > 520)  auto_zoomfactor=2;
    if(priorange > 690)  auto_zoomfactor=3;
    if(priorange > 1130) auto_zoomfactor=4;
@@ -2093,7 +2119,7 @@ function do_tick_decide_autozoom(){
    if(level.timeseconds - decline_timer._reaz_in > 0.030){
       decline_timer._reaz_in = level.timeseconds;
 //      if(auto_oldfov > auto_newfov) auto_setfov -= 0.1;
-      auto_setfov = fclamp((UserSetFOV*10)/auto_zoomfactor, 8.0, UserSetFOV);
+      auto_setfov = fclamp((UserSetFOV*20)/auto_zoomfactor, 8.0, UserSetFOV);
    }
 /*   if(level.timeseconds - decline_timer._reaz_out > 0.020){
       decline_timer._reaz_out = level.timeseconds;
@@ -2220,8 +2246,10 @@ function do_tick_altfire_clr(playerpawn p){
    }                                                // aux_oper bounds check ends
    if(aux_exec){
 //    if(aux_oper==0) aertogglelaser();             // 2024-08-20: disabled
+     /* 2026-01-18: disabled
       if(aux_oper>=1 || aux_oper<=3) aux_oper=4;    // other modes toggle: moved to AERScrollProcess()
-      if(aux_oper==4) query_push(p.Location,r);
+      if(aux_oper==4) query_push(p.Location,r); */
+      query_push(p.Location,r); // 2026-01-18: always push in any aux mode
    }
 // if(aux_exec_alt){                                // unused, alt actions for long rclick
 // }
@@ -2234,12 +2262,17 @@ function aux_validate(bool dir_r){
    if(aux_oper==1 && !ava_ffield && state_forcefield[0]==0) aux_oper++;
    if(aux_oper==2 && !ava_ffield && state_forcefield[1]==0) aux_oper++;
    if(aux_oper==3 && !ava_invis)                            aux_oper = 4;
+   if(aux_oper==4 && !ava_fast_shield)                      aux_oper = 1;
    return;
    dir_l:
    if(aux_oper==3 && !ava_invis)                            aux_oper--;
    if(aux_oper==2 && !ava_ffield && state_forcefield[1]==0) aux_oper--;
    if(aux_oper==1 && !ava_ffield && state_forcefield[0]==0) aux_oper--;
    if(aux_oper==0) /* 2024-08-21: always skipped */         aux_oper = 4;
+   if(aux_oper==4 && !ava_fast_shield){
+      aux_oper = 3;
+      if(!ava_invis) aux_oper--;
+   }
 // if(aux_oper==0 && !ava_laser)                            aux_oper = 4;
 }
 
@@ -2277,9 +2310,9 @@ function query_push(vector l, rotator r){
    local aerprjpushmove pm;
 // local aerprjpushdeco pd;
    local vector x, y, z;
-   do_shutdown_translator();
-   do_shutdown_areamap();
-   if(!ena_fast_shield) ena_fast_shield = true;
+// do_shutdown_translator();  // 2026-01-18: disabled
+// do_shutdown_areamap();
+// if(!ena_fast_shield && ava_fast_shield) ena_fast_shield = true;
    if(level.timeseconds - decline_timer._repush < PushInterval) return;
    query_invis(false);
    getaxes(r,x,y,z);
@@ -2503,10 +2536,10 @@ state Idle{
 //    pawn(Owner).PlayRecoil(1);                       // NFI purpose of this. old code
       if(!entering_setup && ena_setup) return true;
       if(owner == none) return true;
-//      owner.playsound(sound'aerfire_reload', SLOT_None, 32);
-      owner.playsound(sound'aerfire', SLOT_None, 32);
-      for(i=0;i<3;i++){
-//         if(FirePlayers[i]!=none) FirePlayers[i].query_fire();  // 2026-01-11: disabled
+      owner.playsound(sound'aerfire_reload', SLOT_None, 32);
+//      owner.playsound(sound'aerfire', SLOT_None, 32);
+      for(i=0;i<5;i++){
+         if(FirePlayers[i]!=none) FirePlayers[i].query_fire();  // 2026-01-11: disabled
       }
 /*    tmp_byte = ammo_chg >> 2;                        // 2024-04-15
       tmp_byte = tmp_byte << 2;
@@ -2854,7 +2887,12 @@ function AERScrollProcess(bool dir_up){
 //                  warn_opermsg = true;
 //               }
               }else{
-                 ena_fast_shield = !dir_up;
+                 /*  old code
+                 ena_fast_shield = !dir_up;  */
+                 /* ---- 2026-01-18 --------------------------- */
+                 if(!ava_fast_shield) ena_fast_shield = false;
+                    else ena_fast_shield = dir_up; // 2026-01-18: reversed mwheel action
+                 /* ------------------------------------------- */
                  if(!ena_fast_shield){
                     decline_timer._unwarnom = level.timeseconds;
                     aux_oper_msg[1] = "Sniper mode: shield disabled.";
@@ -3195,6 +3233,7 @@ exec function aerforcedodge(){
    p = playerpawn(owner);
    if(p == none) return;
    if(p.weapon != self) return;   // no validate_owner_toggle() call because we need p anyway
+   if(!ava_fast_shield) return;   // 2026-02-22: prevent by noshield due to same power source (fastcap)
    xdir = 0;
    ydir = 0;
    if(p.bwasforward) xdir = 1;
@@ -3301,7 +3340,7 @@ exec function sci_install_areamap(){
       j++;
    }
       self.SetPropertyText("AMI_SHR_factor",areamap.GetPropertyText("SHR_factor"));
-      self.SetPropertyText("AMI_AreaHeight",areamap.GetPropertyText("AreaHeight"));
+      self.SetPropertyText("AMI_FloorHeight",areamap.GetPropertyText("FloorHeight"));
    if(j > 0) ava_areamap = true;
 }
 
@@ -3704,7 +3743,7 @@ defaultproperties{
    ena_areamap=false
    ava_areamap=false
    last_scrollproc_updir=false
-   aux_oper=4
+   aux_oper=1
    tds_oper=1
    RadarScanInterval=2
    radar_qty=0
@@ -3722,7 +3761,8 @@ defaultproperties{
    forced=True
    InfiniteAmmo=false
    warn_opermsg=false
-   ena_fast_shield=true
+   ena_fast_shield=false
+   ava_fast_shield=false
    ena_emi=false
    DisablePushCorridorBalance=false
    bAutoMapKeys=True
