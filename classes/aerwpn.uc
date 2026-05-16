@@ -185,6 +185,12 @@
 // mwheel - keep as is
 // ? - toggle ignoretargets (do not force battlemode)
 
+// todo postbattle skj mines
+// microwave proximity sensors estab straight lines between corpses as mesh net
+// if Dakota cross them, all corpses explode and kill everything in area (mb replace parasite to nontentacle nails?)
+// lines can be scanned by AER, sit 12-18uu above from floor (ignoring terrain hills)
+
+// todo mechanics.u package, move there all gamerules and stub classes, to keep AER.u for AER features.
 
 #exec obj load file="..\System\UnrealShare.u" package="UnrealShare"
 
@@ -216,7 +222,8 @@
 #exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire_reload" package="AER" group="Sound" //was pre2026-01-11
 //..#exec audio import file="sounds\aerfire_impact.wav" name="aerfire" package="AER" group="Sound"   // #4, fast rpm, best
 
-#exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound"   // #3, slow rpm
+#exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound"
+//#exec audio import file="sounds\aerfire_as2laser.wav" name="aerfire" package="AER" group="Sound"
 
 //#exec audio import file="sounds\aerfire_boltdown.wav" name="aerfire" package="AER" group="Sound"
 //#exec audio import file="sounds\aerfire_zippo.wav" name="aerfire" package="AER" group="Sound"
@@ -283,36 +290,8 @@ var bool                forced;      // true if dodge executed
 var int                 xdir, ydir;
 // --- primary fire related ------------------------------------------------------------------------------------------------
 var globalconfig bool   InfiniteAmmo;
-
-//const                   BaseFireInterval       = 0.240; // 250 RPM     2025-05-20    very beginning AER fire rate
-//const                   BaseScrollInterval     = 0.120; // BSI = BFI/2
-//const                   BaseFireInterval       = 0.186; // 322 RPM     2025-07-27
-//const                   BaseScrollInterval     = 0.093;
-//const                   BaseFireInterval       = 0.170; // 352 RPM     2025-09-23
-//const                   BaseScrollInterval     = 0.085;
-const   /* lowest */    BaseFireInterval       = 0.158; // 380 RPM     2025-07-27
-const                   BaseScrollInterval     = 0.079;
-//const                   BaseFireInterval       = 0.142; // 420 RPM     2025-07-20
-//const                   BaseScrollInterval     = 0.071;
-// //  const                   BaseFireInterval       = 0.132; // 450 RPM     2025-06-22
-// //  const                   BaseScrollInterval     = 0.066;
-  /* =============================================================================
-   todo NEW SPEED DATA:
-   ALL firespeeds below are conflicting btw goofing reload sound, prefer to use upper.
-   ============================================================================= */
-//.const                 BaseFireInterval       = 0.124; // 483 RPM     2025-07-07       // was pre2026-01-11
-//const                 BaseScrollInterval     = 0.062;
-//const /* highest */     BaseFireInterval       = 0.114; // 526 RPM     unkn         THESE VARS ARE IDEAL
-//const                   BaseScrollInterval     = 0.057; //                             DO NOT TOUCH.
-//const                   BaseFireInterval       = 0.110; // 545 RPM     2025-08-03
-//const                   BaseScrollInterval     = 0.055;
-//const /**/              BaseFireInterval       = 0.094; // 640 RPM     2025-02-01
-//const                   BaseScrollInterval     = 0.047;
-//const                   BaseFireInterval       = 0.090; // 666 RPM     2025-07-27
-//const                   BaseScrollInterval     = 0.045;
-//const                   BaseFireInterval       = 0.074; // 810 RPM     2025-04-22  shit
-//const                   BaseScrollInterval     = 0.037;
-
+var travel float        BaseFireInterval;
+var travel float        BaseScrollInterval;
 const                   BIOSFireInterval       = 0.180;  // mbshit
 const                   BaseRepowerInterval    = 0.050;  // was .095
 const                   power_max_bot = 22;  // power_max worst/best bounds
@@ -497,6 +476,22 @@ function processprojectiles(playerpawn p){
       do_shutdown_translator();
       do_shutdown_areamap();
    }
+}
+
+exec function aer_advance_rpm(byte new_grade){ switch(new_grade){
+// --- BSI must be BFI/2 ---------------------------------------------- RPM ---- DOI --------- comment ----------
+   case  1: BaseFireInterval=0.240; BaseScrollInterval=0.120; break; // 250  2025-05-20  just assembled
+   case  2: BaseFireInterval=0.186; BaseScrollInterval=0.093; break; // 322  2025-07-27
+   case  3: BaseFireInterval=0.170; BaseScrollInterval=0.085; break; // 352  2025-09-23
+   case  4: BaseFireInterval=0.158; BaseScrollInterval=0.079; break; // 380  2025-07-27  lowest
+   case  5: BaseFireInterval=0.142; BaseScrollInterval=0.071; break; // 420  2025-07-20
+   case  6: BaseFireInterval=0.132; BaseScrollInterval=0.066; break; // 450  2025-06-22
+   case  7: BaseFireInterval=0.124; BaseScrollInterval=0.062; break; // 483  2025-07-07  was pre2026-01-11
+   case  8: BaseFireInterval=0.114; BaseScrollInterval=0.057; break; // 526  unkn        THESE VARS ARE IDEAL, DO NOT TOUCH
+   case  9: BaseFireInterval=0.110; BaseScrollInterval=0.055; break; // 545  2025-08-03
+   case 10: BaseFireInterval=0.094; BaseScrollInterval=0.047; break; // 640  2025-02-01
+   case 11: BaseFireInterval=0.090; BaseScrollInterval=0.045; break; // 666  2025-07-27
+   case 12: BaseFireInterval=0.074; BaseScrollInterval=0.037; break; /* 810  2025-04-22  shit */   }
 }
 
 function processtargets(playerpawn p){
@@ -1904,7 +1899,8 @@ function do_tick_carry_laser(){
    if(shield_blk != none) laserorigin += x*390;  // 320+128 shield, must be more
    laserorigin += z*2;     // maybe todo crouching handling
    laserorigin += y*4;
-   EndTrace = laserorigin + 15000 * x;            // on no06heiko laser go crazy, can't use hitloc for aim calcs
+   EndTrace = laserorigin + 32945 /*15000*/ * x;            // on no06heiko laser go crazy, can't use hitloc for aim calcs
+   // todo reduce scandist to <=400 m, fucked, seems some trace() overflow beyond 20000uu
    atarg_pri = Trace(HitLoc,HitNor,EndTrace,laserorigin,True);
    atarg_sec = Trace(HitLocSec,HitNor,EndTrace,Hitloc + x*128,True);
    targ_is_ffield = bool(aerffieldblk(atarg_pri));
@@ -3825,6 +3821,8 @@ defaultproperties{
    MultiSkins(2)=Texture'AER.Skin.aermtlb'
    MultiSkins(3)=ScriptedTexture'AER.Disp.aerscreen'
    bCanThrow=false
+   BaseFireInterval=0.158
+   BaseScrollInterval=0.079
    shakemag=0.0
    shaketime=0.0
    shakevert=0.0

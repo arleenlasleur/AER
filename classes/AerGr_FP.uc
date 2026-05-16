@@ -7,7 +7,7 @@ function query_fire(){
 
 function tick(float f){
    if(!ena_playfire) return;
-//   playsound(sound'aerfire', SLOT_None, 32);
+   playsound(sound'aerfire', SLOT_None, 32);
    ena_playfire = false;
 }
 

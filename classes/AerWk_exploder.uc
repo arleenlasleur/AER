@@ -16,7 +16,7 @@ simulated function tick(float f){
    if(explode_timer <= 0){
       if(targ.fatness < 210) targ.fatness += (rand(8)+1); //was 4+1
       else{
-         targ.TakeDamage(500000, instigator, targ.location, vect(0,0,40000), 'exploded');
+      /*   targ.TakeDamage(500000, instigator, targ.location, vect(0,0,40000), 'exploded');
          l = targ.location;
          l.z += 32;
          spawn(class'AerWk_expparasite',,,l);
@@ -25,7 +25,7 @@ simulated function tick(float f){
             b = clamp(25-b,1,25);
             w.do_penmon_write(1,b);
          }
-         destroy();
+         destroy();  */     // tmp disabled, todo: sense player proximity or explode by damage. dont explode if nonfat body
       }
       explode_timer = 0.13;
    }

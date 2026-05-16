@@ -67,7 +67,7 @@ function ProcessTouch (Actor Other, Vector HitLocation){
    local byte b;
    if(other == instigator) return;
    if(!other.bispawn){
-      other.takedamage(250,instigator,hitlocation,7000*normal(velocity),'exploded');
+      other.takedamage(250,instigator,hitlocation,25000*normal(velocity),'exploded'); // was 7000*normal
       if(bool(creaturecarcass(other))) foreach RadiusActors(class'aerwpn', w, 6400){
          b = clamp(vsize(w.location - location)/256,1,25);
          b = clamp(25-b,1,25);

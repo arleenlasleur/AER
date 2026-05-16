@@ -3,6 +3,7 @@ var aerwpn aerw;
 
 simulated event Actor SpawnNotification(Actor A){
    local weapon w;
+   local CreatureCarcass cc;
 //    local AerGr_bullethole bh;
    local AerWk_exploder ce;
 //    foreach RadiusActors(class'AerGr_bullethole', bh, 140, a.location) bh.destroy();
@@ -13,10 +14,18 @@ simulated event Actor SpawnNotification(Actor A){
    }
    if(a.isa('HumanCarcass')) return A;          // skip player corpses
    if(caps(string(a.group)) == 'AERIGNORE') return A;    // skip non-tarydium-poisoned corpses
-   ce = spawn(class'AerWk_exploder',,,a.location);
-   if(ce != none){
-      ce.targ = a;
-      ce.enable('tick');
+   if(frand() > 0.4){                      // prevent files on 40% corpses
+      cc = CreatureCarcass(a);
+      if(cc!=none){                        // this should be always true but I check anyway
+         if(cc.bugs != none){
+            cc.bugs.destroy();
+            ce = spawn(class'AerWk_exploder',,,a.location);   // enable parasite explode of them
+            if(ce != none){
+               ce.targ = a;
+               ce.enable('tick');
+            }
+         }
+      }
    }
    return A;
 }

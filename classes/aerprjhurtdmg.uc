@@ -428,26 +428,15 @@ defaultproperties{
         fire_location=(X=0.0,Y=0.0,Z=0.0)
         DisableHitsens=False
         MomentumTransfer=15000
-        speed=12200.0
-//      speed=12200 270m/s
-//      speed=40000.0
-//      speed=26000.0 latest
-        MaxSpeed=12200.0
-//      MaxSpeed=48000.0
+        speed=10400.0
+        MaxSpeed=10400.0
+        // 8000 = 170 m/s
+        // 10400 = 220 m/s
+        // 13200 = 280 m/s
+        // was 22000
         Damage=5.0
-//        DrawType=DT_Mesh
         DrawType=DT_None
         DrawScale=0.7
-//        Mesh=Mesh'aerbullet3'
-        Mesh=Mesh'AER.aerlaserblast'
-        MultiSkins(0)=Texture'aertracer'
-//        MultiSkins(0)=Texture'aerscreenbg'
         ScaleGlow=3.00000
-        LightEffect=LE_NonIncidence
         LightType=LT_None
-//        LightType=LT_Steady
-        LightBrightness=5
-        LightHue=170
-        LightSaturation=195
-        LightRadius=6
 }
