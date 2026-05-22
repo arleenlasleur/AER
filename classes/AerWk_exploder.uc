@@ -8,9 +8,9 @@ var actor targ;
 var float explode_timer;
 
 simulated function tick(float f){
-   local aerwpn w;
-   local byte b;
-   local vector l;
+//   local aerwpn w;
+//   local byte b;
+//   local vector l;
    if(targ==none) destroy();
    explode_timer -= f;
    if(explode_timer <= 0){

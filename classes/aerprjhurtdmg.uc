@@ -120,7 +120,7 @@ function tick(float f){
 //      broadcastmessage(speed);
       velocity = vector(r) * speed;                            */
 
-//      if(trail_count >= 2 && self.DrawType == DT_None) self.DrawType = DT_Mesh;
+      if(trail_count >= 2 && self.DrawType == DT_None) self.DrawType = DT_Mesh;
 
 //      if(LightBrightness < 210) LightBrightness = clamp(trail_count,1,210) * 6;
 
@@ -436,6 +436,7 @@ defaultproperties{
         // was 22000
         Damage=5.0
         DrawType=DT_None
+//        Mesh=mesh'AER.aerbullet3'
         DrawScale=0.7
         ScaleGlow=3.00000
         LightType=LT_None

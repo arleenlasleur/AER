@@ -3,7 +3,7 @@
 // ==============================================================================================================================
 // todo autoincrease projspeed, proj starts with visible slow speed + mb mesh, go to 12000+ speed after short delay, +sonic break snd
 
-   class aerwpn extends weapon config(aercfg);     // comments hist date format: YYYY-MM-DD
+   class AERwpn extends weapon config(aercfg);     // comments hist date format: YYYY-MM-DD
 // bug strange autozoom behavior with fastshield // upd, this is normal due to range behavior
 // mb bug: false positive query_push while holding altfire, not pressing. dead mouse btn?
 
@@ -266,15 +266,15 @@ var byte scanline;
 var float               maxdist,savedist;
 var bool                ena_apscan;                     // for init delay
 // --- zoom, FOV, mouse, timers --------------------------------------------------------------------------------------------
-var globalconfig int    UserSetFOV;
+var globalconfig int    UserSetFOV;   // todo make this automatic. calc necess fov from clipx/clipy ratio
 struct aertimers      {
     var float    _refire,     _reaim,      _unsnipe,    _unfeel,     _redodge,    _reammo,     _repower,  _hitsens,
-                 _showmsg,    _hidemsg,    _dlmsg,      _reclick,    _unwarnom,   _unwarnaux,  _repush,   _readvhello,
+    _instmap,    _showmsg,    _hidemsg,    _dlmsg,      _reclick,    _unwarnom,   _unwarnaux,  _repush,   _readvhello,
                  _rescan,     _releash,    _refeature,  _clrpenmon,  _unspanff,   _reffsta[2], _sh_cap,   _sh_dmgdec,
                  _redisch,    _rechrg,     _unobj,      _untrig,     _rerssi,     _initscan,   _reaz_in,  _reaz_out; };
 var bool                ava_synth, boost_power;     // faster flags todo replace 'boost_power' with int powersrc_level
 var bool                bZoomScreen;
-var aertimers           decline_timer;
+var aertimers           tmr;
 var float               last_firetime;
 var float               initial_mousesens,
                         initial_fov, // pawn fov when pickup
@@ -330,7 +330,7 @@ var travel int          fast_shield_chg;
 var byte                populated_shield_dmg;
 var byte                incoming_danger;
 // --- EMI shock related----------------------------------------------------------------------------------------------------
-var travel float        decline_timer_unshock;
+var travel float        tmr_unshock;
 var travel bool         ena_emi;
 // --- other operations ----------------------------------------------------------------------------------------------------
 var globalconfig float  RClickExecCmdMax,                                   // fast rclick speed
@@ -402,7 +402,10 @@ var byte AMI_DataStart;                               // from where to copy data
 var texture AMI_MapTex[63];                           // payload
 var int AMI_AlignX[63],AMI_AlignY[63],AMI_AlignZ[63]; // align
 var byte AMI_SHR_factor;                              // bitshift factor (pixel to uu scale)
-var float AMI_FloorHeight;                             // AreaZ height if other than 128
+var float AMI_FloorHeight;                            // AreaZ height if other than 128
+// --- 3d level-stg areamap ------------------------------------------------------------------------------------------------
+var actor               areamap_datacell;             // this MUST be NOT travel, for autoblanking on new level
+var AerGr_PO            azm_pawn_overlay;             // pawn meshverts shadowcopy
 // --- compass mark related ------------------------------------------------------------------------------------------------
 var vector              pos_objective;
 var bool                ava_objective,
@@ -507,13 +510,13 @@ function processtargets(playerpawn p){
         RadarScanIntervalFloat=0.05;                           // 20 PPS, default
         if(RadarScanInterval>=3) RadarScanIntervalFloat=0.01;  // 100
         if(RadarScanInterval<=1 || !ava_fullscan) RadarScanIntervalFloat=0.1;   // 10
-        if(level.timeseconds - decline_timer._rescan < RadarScanIntervalFloat) return;
-        decline_timer._rescan = level.timeseconds;
+        if(level.timeseconds - tmr._rescan < RadarScanIntervalFloat) return;
+        tmr._rescan = level.timeseconds;
         getaxes(p.viewrotation, x, y, z);
         radar_qty = 0;
         radar_vqty = 0;
         anylock = false;
-        if(newfov == 0) newfov = UserSetFOV;  // todo make this automatic. calc necess fov from clipx/clipy ratio
+        if(newfov == 0) newfov = UserSetFOV;
 // ====================================================================================== target radar
         foreach RadiusActors(class'pawn', t, RadarScanRadius){
            if(instr(caps(string(t.group)),"AERTARG") == -1 || t.health <= 0) continue;
@@ -587,6 +590,7 @@ event RenderOverlays(canvas c){
    if(!canvas_set) calccoords(c);            // for correct radar screen functioning we need to call this at least once
    Texture'aerscreen'.NotifyActor = Self;
    Super.RenderOverlays(c);
+   render_azm_holo(c);
    Texture'aerscreen'.NotifyActor = none;    // disabling this let 3rd players see screen, 'Detached client' otherwise
                                              // this feature require multiple unique textures, like sidisptex
    // todo:
@@ -634,6 +638,10 @@ simulated event RenderTexture(ScriptedTexture Tex){
       }
    }
    skip_noapscan:
+// ====================================================================================== arlscan
+//   if(ena_areamap || ena_translator || ena_apscan) goto skip_noarlscan;
+   render_azm_new(tex);
+   skip_noarlscan:
 // ====================================================================================== mb portal
 //   tex.Draw3DLine(MakeColor(255,0,255),vect(0,0,0),vect(10,10,10));
 //   tex.PortalInfo.FOV = newfov;     // 2024-04-14: deleted. contrast looks like shit, terrible idea
@@ -729,7 +737,7 @@ simulated event RenderTexture(ScriptedTexture Tex){
    }
 // ====================================================================================== radar dots
    if(!snipe || ena_areamap || ena_translator) goto skip_notarg;
-   tmp_byte = ((level.timeseconds-decline_timer._hitsens)>0.1) ? 1 : 0;
+   tmp_byte = ((level.timeseconds-tmr._hitsens)>0.1) ? 1 : 0;
    tmp_ammo = 0;
    for(i=0;i<radar_qty;i++){
       if(!radar[i].ena) continue;
@@ -908,14 +916,14 @@ simulated event RenderTexture(ScriptedTexture Tex){
    if(!ena_cloak) goto skip_cd_stat;
    pc = assign_state_color(ena_invis,             ava_invis, 200,200,255);              tex.drawcoloredtext(221,     239,"ST",font'aerfontsma',pc);
    skip_cd_stat:
-/* pc = assign_state_color(level.timeseconds - decline_timer._repush < PushInterval,  // old code
+/* pc = assign_state_color(level.timeseconds - tmr._repush < PushInterval,  // old code
                                                   true,      255,255,160);               tex.drawcoloredtext(239,     239,"VI",font'aerfontsma',pc); */
 // --------  2026-01-18  --------------------------------------------------------------------------------
    pc = makecolor(200,200,255);
    tmp_string = "SM";
    if(ena_fast_shield) tmp_string = "FS";
    if(!ava_fast_shield) pc = makecolor(220,200,200);
-   if(level.timeseconds - decline_timer._repush < PushInterval){
+   if(level.timeseconds - tmr._repush < PushInterval){
       pc = makecolor(255,255,160);
       tmp_string = "VI";
    }
@@ -923,7 +931,7 @@ simulated event RenderTexture(ScriptedTexture Tex){
 // ------------------------------------------------------------------------------------------------------
 
    pc = assign_presence_color(true,200,200,255);
-   d = level.timeseconds - decline_timer._reclick;                              // shithack, d was used above
+   d = level.timeseconds - tmr._reclick;                              // shithack, d was used above
    if(pw_sens_altfire && d >= RClickChgModeMin && d < RClickChgModeMax)       pc = assign_presence_color(true,255,0,0);
    if(pw_sens_altfire && d >= RClickExecAltCmdMin && d < RClickExecAltCmdMax) pc = assign_presence_color(true,0,255,255); // exec alt
    j = 167 + (aux_oper*18) + mb18;  // j = fabricated x coord, mb18 = maybe 18px offset
@@ -1121,22 +1129,206 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
    tex.DrawTile(119,129,16,16, nmarker*16,0, 16,16, texture'aerbearing', true, pc);    
 }
 
-function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime raytracing areamap, don't need data actors, slower
-   local vector x,y,z,xv,yv,zv;
-   local rotator r;
-   local int i,k;
+function render_azm(scriptedtexture tex){
+//   local PlayerPawn P;
+   local AZM_Data zm;
+   local vector xv,yv,zv;
+   local int i;
    local color pc;
-   local vector ctr_l,hit_n,ctr_etr; // contour trace location
    local vector dir;
-   local actor atarg;
+   local int xp, yp;
+   local int GlobalIndex, gx, gy;
+   local vector WorldPos;
+   local float UncompressedZ;
+   if (owner==none) return;
+//   P = PlayerPawn(owner);
+//   if (P == none) return;
+   getaxes(owner_viewrotation, xv, yv, zv);
+   // Querying the active live player pawn updates variables in real-time
+//   getaxes(P.ViewRotation, xv, yv, zv);
+   if(newfov == 0) newfov = UserSetFOV;
+   foreach level.allactors(class'AZM_Data',zm){
+      if(vsizesq(zm.location-owner_location)>=2250000) continue;
+      debugstr = string(zm.name);
+      for(i = 0; i < 242; i++){
+         if (zm.CompressedHeights[i] == 255) continue; 
+         GlobalIndex = zm.SliceOffset + i;
+         gx = GlobalIndex % 22;
+         gy = GlobalIndex / 22;
+         WorldPos.X = zm.GridMinBounds.X + (gx * 48.0);
+         WorldPos.Y = zm.GridMinBounds.Y + (gy * 48.0);
+         // Reconstruct absolute world Z relative to the +384 elevated scanning ceiling
+         UncompressedZ = Float(zm.CompressedHeights[i]) * 4.0;
+         WorldPos.Z = (zm.Location.Z + 384.0) - UncompressedZ;
+       //         UncompressedZ = (Float(zm.CompressedHeights[i]) /*- 96.0 */) * 4.0; // old code
+       //         WorldPos.Z = zm.Location.Z + UncompressedZ;
+         dir = WorldPos - owner.location;
+//         dir /= vsize(dir);
+//         if((dir dot xv) < 0.7) continue;
+         if((dir dot xv) < 1.0) continue;
+         pc = makecolor(120,120,153);
+         if(!fasttrace(WorldPos,owner.location)) pc = makecolor(75,75,96); // behindwall color
+         xp = ( (dir dot yv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
+         yp = (-(dir dot zv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
+//         xp = ( (dir dot yv) / (dir dot xv) ) * (clipxdiv2 / tan(newfov * pi / 360));
+//         yp = (-(dir dot zv) / (dir dot xv) ) * (clipxdiv2 / tan(newfov * pi / 360));
+         xp += scale128;
+         yp += scale128;
+         xp = int(xp/scale1);
+         yp = int(yp/scale1);
+         if(xp<5 || xp>251 || yp<15 || yp>245) continue;
+         if(low_batt || ena_invis) pc = lowbatt_color(pc);
+         tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
+      }
+   }
+}
+
+function render_azm_new(scriptedtexture tex){
+   local vector offset,align,truealign;
+   local vector xv, yv, zv;
+   local color pc;
+   local pawn pt;
+   local vector dir; //, UserLoc; //, DotLoc8, WorldPos;
+   local int xp, yp;
+   local int i;
+   if (owner == none) return;
+
+   if(areamap_datacell==none) return;
+   if(azm_pawn_overlay==none) return;
+   getaxes(owner_viewrotation, xv, yv, zv);
+   if(newfov == 0) newfov = UserSetFOV;
+
+   if(!areamap_datacell.mesh) return;
+   offset = areamap_datacell.location;
+   align.x = -1569.331055;
+   align.y =  482.653351;
+   align.z = -1472.461670;
+
+   if(areamap_datacell.drawscale!=0.08){
+      areamap_datacell.drawscale = 0.08;
+//      areamap_datacell.setlocation(vect(0,0,0));
+   }
+   truealign =  vect(0,0,0);
+   truealign -= offset;
+   truealign += align;
+   truealign /= 0.08;
+
+   areamap_datacell.allframeverts(meshverts);
+   for(i=0;i<meshverts.size();i++){
+//         if(i==0) debugstr = string(meshverts[i]);
+//         meshverts[i] += vrand()*2.0; // 0=orig, 2=ok, 7=fuzz
+         dir = /*owner_location -*/ meshverts[i] - owner_location - align; //*10 - truealign;
+//         dir =  truealign;
+
+//         dir += owner_location;
+         dir += vect(0,0,0);
+         // todo
+         // restore scale, do 100% align
+         // no rotate, add camera actor
+         // test with pawns
+         // test added offset
+
+         dir /= vsize(dir);
+         if((dir dot xv) < 0.7) continue;
+         pc = makecolor(120,120,153);   // 200 200 255 too bright              // primary: white color
+         xp = ( (dir dot yv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
+         yp = (-(dir dot zv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
+         xp += scale128;
+         yp += scale128;
+         xp = int(xp/scale1);
+         yp = int(yp/scale1);
+         if(xp<5 || xp>251 || yp<15 || yp>245) continue;
+         if(low_batt || ena_invis) pc = lowbatt_color(pc);
+         tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
+   }
+
+   for(pt=level.pawnlist; pt!=none; pt=pt.nextpawn){
+      if(pt.health<=0) continue;
+      if(pt==owner) continue; // user, do not render
+//      azm_pawn_overlay = pt;
+      azm_pawn_overlay.setlocation(pt.location * 0.08);
+      azm_pawn_overlay.setrotation(pt.rotation);
+      azm_pawn_overlay.Fatness      = pt.Fatness;
+      azm_pawn_overlay.AnimSequence = pt.AnimSequence;
+      azm_pawn_overlay.AnimFrame    = pt.AnimFrame;
+      azm_pawn_overlay.PrePivot     = pt.PrePivot;
+      azm_pawn_overlay.Skin         = pt.Skin;
+      azm_pawn_overlay.Texture      = pt.Texture;
+      azm_pawn_overlay.Mesh         = pt.Mesh;
+      azm_pawn_overlay.DrawScale    = pt.DrawScale * 0.08;
+      azm_pawn_overlay.DrawType     = pt.DrawType;
+      
+      azm_pawn_overlay.allframeverts(meshverts);
+      for(i=0;i<meshverts.size();i++){
+         dir = meshverts[i] - owner_location; // todo: 
+                                              // pawn coords incorrect, translate to 1:1 level and only then downscale
+//         dir /= 0.008;
+  //       dir += owner_location;
+         dir += vect(0,0,0);
+         dir /= vsize(dir);
+         if((dir dot xv) < 0.7) continue;
+         pc = makecolor(153,153,153);                                                                           // undefined
+         if(pt.AttitudeToPlayer==ATTITUDE_Fear){   pc = makecolor(130,130,170); goto skip_done_att_pawncolor; } // insuff. positive
+         if(pt.AttitudeToPlayer==ATTITUDE_Hate ||
+            pt.AttitudeToPlayer==ATTITUDE_Frenzy){ pc = makecolor(255,200,200); goto skip_done_att_pawncolor; } // danger
+         if(pt.AttitudeToPlayer==ATTITUDE_Threaten ||
+            pt.AttitudeToPlayer==ATTITUDE_Ignore){ pc = makecolor(170,130,130); goto skip_done_att_pawncolor; } // insuff. negative
+         if(pt.AttitudeToPlayer==ATTITUDE_Friendly ||
+            pt.AttitudeToPlayer==ATTITUDE_Follow){ pc = makecolor(120,153,120); goto skip_done_att_pawncolor; } // friendly
+         skip_done_att_pawncolor:
+         xp = ( (dir dot yv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
+         yp = (-(dir dot zv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
+         xp += scale128;
+         yp += scale128;
+         xp = int(xp/scale1);
+         yp = int(yp/scale1);
+         if(xp<5 || xp>251 || yp<15 || yp>245) continue;
+         if(low_batt || ena_invis) pc = lowbatt_color(pc);
+         tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
+      }
+   }
+
+}
+
+function render_azm_holo(canvas c){
+    local vector xv, yv, zv;
+    local color pc;
+    local vector dir;
+//    local int xp, yp;
+    local int i;
+    if (owner == none) return;
+
+    if(areamap_datacell==none) return;
+    getaxes(owner_viewrotation, xv, yv, zv);
+    if(newfov == 0) newfov = UserSetFOV;
+
+      if(!areamap_datacell.mesh) return;
+      areamap_datacell.allframeverts(meshverts);
+      for(i=0;i<meshverts.size();i++){
+            dir = meshverts[i] - owner_location; // todo align from rendertex version
+            pc = makecolor(120,120,153);   // 200 200 255 too bright              // primary: white color
+            if(i<10) c.draw3dline(pc,dir,dir+vect(10,10,10)); // working in actual location, todo move this into user room
+//            if(low_batt || ena_invis) pc = lowbatt_color(pc);
+ //           tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
+      }
+}
+
+function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime raytracing areamap, don't need data actors, slower
+   local vector /*x,y,z,*/xv,yv,zv;
+//   local rotator r;
+   local int i/*,k*/;
+   local color pc;
+//   local vector ctr_l,hit_n,ctr_etr; // contour trace location
+   local vector dir;
+//   local actor atarg;
    local int xp, yp;
 
 //   foreach allactors(class'pawn',targ) if(targ.isa('brute')) break;
 
-   r = rotator(owner.location - targ.location);
-   getaxes(pawn(owner).viewrotation, xv, yv, zv);
-   if(newfov == 0) newfov = UserSetFOV;  // todo make this automatic. calc necess fov from clipx/clipy ratio
-   if(!glob_dbg_once){
+//   r = rotator(owner_location - targ.location);
+   getaxes(owner_viewrotation, xv, yv, zv);
+   if(newfov == 0) newfov = UserSetFOV;
+//   if(!glob_dbg_once){
 
       if(!targ.mesh) return;
       targ.allframeverts(meshverts);
@@ -1177,7 +1369,7 @@ function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime rayt
 //       r.pitch += 2730.666;
       }
          // glob_dbg_once = true;
-   }
+//   }
    // *************************** unused
 
  /*  for(i=0;i<4;i++){
@@ -1281,8 +1473,8 @@ function render_areamap(scriptedtexture tex){   // realtime raytracing areamap, 
 function do_tick_scan_rssi(){
    local pathnode pn,pn_act;
    local float dist,dist_act;
-   if(level.timeseconds - decline_timer._rerssi < 0.7) return;
-   decline_timer._rerssi = level.timeseconds;
+   if(level.timeseconds - tmr._rerssi < 0.7) return;
+   tmr._rerssi = level.timeseconds;
    modem_rssi = 0;
    dist_act = 1025.0;
    foreach radiusactors(class'pathnode',pn,384){
@@ -1484,7 +1676,7 @@ function attempt_tag_target(pawn targ){
 function do_hitsens_clr(){
    local byte i;
    if(ignore_hitsens_rst) return;
-   if(level.timeseconds-decline_timer._hitsens<0.2) return;
+   if(level.timeseconds-tmr._hitsens<0.2) return;
    for(i=0;i<radar_max;i++) radar[i].hit=false;
    ignore_hitsens_trig=false;
    ignore_hitsens_rst=true;
@@ -1497,7 +1689,7 @@ function do_hitsens_set(){
       if(!radar[i].hit) continue;
       ignore_hitsens_rst=false;
       ignore_hitsens_trig=true;
-      decline_timer._hitsens=level.timeseconds;
+      tmr._hitsens=level.timeseconds;
    }
 }
 
@@ -1515,7 +1707,7 @@ function do_objective_clr(){
       ena_objective = false;
       return;
    }
-   if(level.timeseconds - decline_timer._unobj <= 8.0) return;
+   if(level.timeseconds - tmr._unobj <= 8.0) return;
    ena_objective = false;
 }
 
@@ -1572,7 +1764,7 @@ function cut_message(string msg_raw,byte max_cols,byte max_rows,bool bSignTarg){
 function postrender(canvas c){
    if(canvas_finfo == none) return;
    c.font = canvas_finfo.GetCanvasFont();
-   return;
+//   return;
    c.setpos(100,70);
 //   debugstr = "hello";
    c.drawtext("Debug: "$debugstr);
@@ -1586,8 +1778,8 @@ function report_trans_msg_download(){
    local byte i;
    if(!ena_translator) return;
    if(transmsg_receiver == none) return;
-   if(level.timeseconds - decline_timer._dlmsg < 0.1) return;
-   decline_timer._dlmsg = level.timeseconds;
+   if(level.timeseconds - tmr._dlmsg < 0.1) return;
+   tmr._dlmsg = level.timeseconds;
    t = transmsg_receiver.getmessage();
    if(t == none) return;
    msg_raw = t.message;
@@ -1660,8 +1852,8 @@ function populate_trans_msg(){     // bug: areasign can be writed in msg history
    local translatorevent t;        // maybe fixed
    local bool transmsg_relevant;
    if(snipe || DisableReader || transmsg_receiver==none) return;
-   if(level.timeseconds - decline_timer._showmsg < 0.5) return;
-   decline_timer._showmsg = level.timeseconds;
+   if(level.timeseconds - tmr._showmsg < 0.5) return;
+   tmr._showmsg = level.timeseconds;
    t = FindTransEvent();
    if(!transmsg_proximity || t==none) return;
    if(t.message == "") return;
@@ -1714,7 +1906,7 @@ function do_visibility(playerpawn p){          // irradiator stalker-like vis ca
 function query_hide_msg(){
    if(!transmsg_proximity) return;
    if(snipe) goto hide_msg_immediate;
-   if(level.timeseconds-decline_timer._hidemsg < HideMsgInterval) return;  // delayed
+   if(level.timeseconds-tmr._hidemsg < HideMsgInterval) return;  // delayed
    if(ena_translator && FindTransEvent()==none) ena_translator = false;
    hide_msg_immediate:
    trans_msg_areasign = false;
@@ -1750,7 +1942,7 @@ function do_forcefield_overrange_shdn(){
 
 function do_opermsg_clr(){
    if(!warn_opermsg) return;
-   if(level.timeseconds-decline_timer._unwarnom < 4.0) return;
+   if(level.timeseconds-tmr._unwarnom < 4.0) return;
    aux_oper_msg[0] = "";
    aux_oper_msg[1] = "";
    warn_opermsg = false;
@@ -1758,7 +1950,7 @@ function do_opermsg_clr(){
 
 function do_auxswitch_errwarn_clr(){
    if(!warn_aux) return;
-   if(level.timeseconds-decline_timer._unwarnaux < 0.3) return;
+   if(level.timeseconds-tmr._unwarnaux < 0.3) return;
    warn_aux = false;
 }
 
@@ -1767,20 +1959,20 @@ function do_forcefield_span(){
    fa = FindAERTrigger(owner_location, 160, true);
    if(fa != none && fa.isa('aerfieldattractor')){
       sensed_forcefield_attractor = fa;
-      decline_timer._unspanff = level.timeseconds;
+      tmr._unspanff = level.timeseconds;
    }
 }
 
 function do_forcefield_unspan(){
    if(sensed_forcefield_attractor == none) return;
-   if(level.timeseconds - decline_timer._unspanff < 0.5) return;
-   decline_timer._unspanff = level.timeseconds;
+   if(level.timeseconds - tmr._unspanff < 0.5) return;
+   tmr._unspanff = level.timeseconds;
    sensed_forcefield_attractor = none;
 }
 
 function do_opertrig_forget(){
-   if(level.timeseconds - decline_timer._untrig < 0.5) return;
-   decline_timer._untrig = level.timeseconds;
+   if(level.timeseconds - tmr._untrig < 0.5) return;
+   tmr._untrig = level.timeseconds;
    mwheel_trig = 0;
 }
 
@@ -1796,7 +1988,7 @@ function do_dmgmon_write(byte newdata_admg){
 function do_penmon_write(byte newdata_pen, byte newdata_full){
 //2024-04-17: deleted move routines from write func. maybe graph will be more smooth
 //   local byte i;
-//        decline_timer._clrpenmon = level.timeseconds;       // not so necessary but graph look better
+//        tmr._clrpenmon = level.timeseconds;       // not so necessary but graph look better
 //        for(i=1;i<penmon_capacity;i++) penetrability_monitor[i-1] = penetrability_monitor[i];
      /* if(low_batt){                                       // 2024-04-13: deleted
            newdata_pen = 0;
@@ -1805,13 +1997,13 @@ function do_penmon_write(byte newdata_pen, byte newdata_full){
 // 2024-12-08: enough test, no animtearing, all above former code may be deleted
         penetrability_monitor[penmon_capacity]._rem  = clamp(newdata_pen, 0,25);
         penetrability_monitor[penmon_capacity]._full = clamp(newdata_full,0,25);
-//        decline_timer._clrpenmon = level.timeseconds; // may be deleted
+//        tmr._clrpenmon = level.timeseconds; // may be deleted
 }
 
 function do_penmon_clr(){
    local byte i;
-   if(level.timeseconds - decline_timer._clrpenmon < BaseScrollInterval) return;
-   decline_timer._clrpenmon = level.timeseconds;
+   if(level.timeseconds - tmr._clrpenmon < BaseScrollInterval) return;
+   tmr._clrpenmon = level.timeseconds;
    for(i=1;i<penmon_capacity;i++) penetrability_monitor[i-1] = penetrability_monitor[i];
    penetrability_monitor[penmon_capacity]._rem = 0;
    penetrability_monitor[penmon_capacity]._full = 0;
@@ -1852,13 +2044,13 @@ function Timer(){
    do_opertrig_forget();
    do_external_managers_poll();
    if(radar_vqty>0){                    // override to battle mode, todo for areamap mb make this disableable
-      decline_timer._unsnipe = level.timeseconds;
+      tmr._unsnipe = level.timeseconds;
       snipe = true;
       do_shutdown_translator();
       do_shutdown_areamap();
    }
    aercfg_advance_hello();
-   if(snipe && radar_vqty<=0 && level.timeseconds-decline_timer._unsnipe >= 1.2) snipe=false;
+   if(snipe && radar_vqty<=0 && level.timeseconds-tmr._unsnipe >= 1.2) snipe=false;
    if(p.weapon != self) return;
 // pt = p.playerreplicationinfo.team + 1;   // from H.E.R code
    bestaim = 0.95;
@@ -1997,8 +2189,8 @@ function do_tick_carry_fireplayers(){
 
 function do_leash_laser(){
    if(!ena_laser) return;
-   if(level.timeseconds - decline_timer._releash <= 2.0) return;
-   decline_timer._releash = level.timeseconds;
+   if(level.timeseconds - tmr._releash <= 2.0) return;
+   tmr._releash = level.timeseconds;
    if(laserdot == none || laserdotsec == none){ // laser isn't exist while must be
       query_laser(false,false);                 // ctrl alt del this fucker
       if(ava_laser) query_laser(true,false);
@@ -2034,7 +2226,7 @@ function do_tick_altfire_set(playerpawn p){          // bug: rmouse slows down c
    bMyOwnsCrosshair = true;
    r = owner_viewrotation;
    aux_old_yaw = r.yaw;
-   decline_timer._reclick=level.timeseconds;
+   tmr._reclick=level.timeseconds;
    if(ena_fast_shield) return;
    zoomfactor = 1;
    priorange = anylock ? range_targ : range;
@@ -2052,7 +2244,7 @@ function do_tick_altfire_set(playerpawn p){          // bug: rmouse slows down c
 
 function do_tick_decide_autozoom(){
    local int priorange;
-   local float fov_offset;
+//   local float fov_offset;
 
     local float x, angle, b;
 
@@ -2112,20 +2304,20 @@ function do_tick_decide_autozoom(){
 //   auto_newfov = fclamp((UserSetFOV*10)/auto_zoomfactor, 8.0, UserSetFOV);
 
    auto_oldfov = auto_setfov;
-   if(level.timeseconds - decline_timer._reaz_in > 0.030){
-      decline_timer._reaz_in = level.timeseconds;
+   if(level.timeseconds - tmr._reaz_in > 0.030){
+      tmr._reaz_in = level.timeseconds;
 //      if(auto_oldfov > auto_newfov) auto_setfov -= 0.1;
       auto_setfov = fclamp((UserSetFOV*20)/auto_zoomfactor, 8.0, UserSetFOV);
    }
-/*   if(level.timeseconds - decline_timer._reaz_out > 0.020){
-      decline_timer._reaz_out = level.timeseconds;
+/*   if(level.timeseconds - tmr._reaz_out > 0.020){
+      tmr._reaz_out = level.timeseconds;
       if(auto_oldfov < auto_newfov) auto_setfov += 0.1;
    } */
 }
 
 function do_tick_shield_capacitor(){
-   if(level.timeseconds - decline_timer._sh_cap < 0.040) return;
-   decline_timer._sh_cap = level.timeseconds;
+   if(level.timeseconds - tmr._sh_cap < 0.040) return;
+   tmr._sh_cap = level.timeseconds;
    if(!pw_sens_altfire && fast_shield_chg<275 && batt_chg>0
        && state_forcefield[0]!=1 && state_forcefield[1]!=1){  // 2025-04-24: any of F1 F2 fields prevents capactor charge
       consume_main_cell(batt_per_shield);
@@ -2151,7 +2343,7 @@ function do_shield_degrade(byte incoming_dmg){
 }
 
 function do_shield_dmg_decay(){
-   if(level.timeseconds - decline_timer._sh_dmgdec <= 0.02) return;
+   if(level.timeseconds - tmr._sh_dmgdec <= 0.02) return;
    if(populated_shield_dmg == 0) return;
    populated_shield_dmg--;
    if(populated_shield_dmg >   2) populated_shield_dmg--;
@@ -2161,7 +2353,7 @@ function do_shield_dmg_decay(){
    if(populated_shield_dmg >  32) populated_shield_dmg--;
 // if(populated_shield_dmg >  64) populated_shield_dmg--;  // unused
 // if(populated_shield_dmg > 128) populated_shield_dmg--;
-   decline_timer._sh_dmgdec = level.timeseconds;
+   tmr._sh_dmgdec = level.timeseconds;
 }
 
 function do_tick_shield(){
@@ -2211,7 +2403,7 @@ function do_tick_altfire_clr(playerpawn p){
    if(pw_sens_altfire || !bMyOwnsCrosshair) return;
    bOwnsCrosshair = true;
    bMyOwnsCrosshair = false;
-   clickspeed = level.timeseconds - decline_timer._reclick;
+   clickspeed = level.timeseconds - tmr._reclick;
    newfov = initial_fov;
    p.mousesensitivity = initial_mousesens;
    zoomfactor = 1;
@@ -2225,7 +2417,7 @@ function do_tick_altfire_clr(playerpawn p){
               goto skip_mandatory_crouch;   // 2024-11-15: anyway skip. impacts UX while battle, this is shit
    if(!snipe) goto skip_mandatory_crouch;
    if(aux_imminent && !pw_sens_crouch){
-      decline_timer._unwarnaux = level.timeseconds;
+      tmr._unwarnaux = level.timeseconds;
       warn_aux = true;
       aux_imminent = false;
    }
@@ -2279,8 +2471,8 @@ function do_external_managers_poll(){
                                 // todo or affect speed
         local bool mgr_synth,mgr_power,mgr_feature;
         if(!boost_power && ena_powercell) boost_power = true;
-        if(level.timeseconds - decline_timer._refeature < 0.5) return;
-        decline_timer._refeature = level.timeseconds;
+        if(level.timeseconds - tmr._refeature < 0.5) return;
+        tmr._refeature = level.timeseconds;
         any_shards = false;
         foreach radiusactors(class'aeram_shard',as,128,owner_location) any_shards = true;
         extmgr = FindAERTrigger(owner_location, 128, false);
@@ -2309,10 +2501,10 @@ function query_push(vector l, rotator r){
 // do_shutdown_translator();  // 2026-01-18: disabled
 // do_shutdown_areamap();
 // if(!ena_fast_shield && ava_fast_shield) ena_fast_shield = true;
-   if(level.timeseconds - decline_timer._repush < PushInterval) return;
+   if(level.timeseconds - tmr._repush < PushInterval) return;
    query_invis(false);
    getaxes(r,x,y,z);
-   decline_timer._repush = level.timeseconds;
+   tmr._repush = level.timeseconds;
    owner.playsound(sound'aerpush', SLOT_None, 16);
 //      spawn(class'aerprjpushdeco',,,l+12*z+1*y,r);  //2024-12-21: removed airpush trails
 // pd = spawn(class'aerprjpushdeco',,,l+12*z+1*y,r);
@@ -2328,9 +2520,9 @@ function do_reammo(){
    if(ammo_chg > 20) synth_1divx_speed = 2;
    if(ammo_chg > 30) synth_1divx_speed = 1;
    if(!ava_synth) return;
-   if(level.timeseconds - decline_timer._reammo < 0.8 * synth_1divx_speed) return;
+   if(level.timeseconds - tmr._reammo < 0.8 * synth_1divx_speed) return;
    if(ammo_chg<ammo_max) ammo_chg++;
-   decline_timer._reammo = level.timeseconds;
+   tmr._reammo = level.timeseconds;
 }
 
 function do_tick_aim(){
@@ -2338,9 +2530,9 @@ function do_tick_aim(){
    if(deaim_rate<=default.deaim_rate) return;
    aim_restore_speed = clamp(deaim_rate,1,6);
    if(pw_sens_crouch && aim_restore_speed>=2) aim_restore_speed = aim_restore_speed>>1;
-   if(level.timeseconds-decline_timer._refire>BaseFireInterval*4) aim_restore_speed = 1;
-   if(level.timeseconds-decline_timer._reaim<=BaseFireInterval*aim_restore_speed) return;
-   decline_timer._reaim = level.timeseconds;
+   if(level.timeseconds-tmr._refire>BaseFireInterval*4) aim_restore_speed = 1;
+   if(level.timeseconds-tmr._reaim<=BaseFireInterval*aim_restore_speed) return;
+   tmr._reaim = level.timeseconds;
    deaim_rate--;
 }
 
@@ -2370,7 +2562,7 @@ function do_tick_power(float known_batt_deficit){
    if(low_batt) more_decline += 1.1;
    if(power_chg>=power_max)  more_decline += 0.8;  // synth chg slow
    if(boost_power) more_decline *= 0.33;           // was /=3
-   if(level.timeseconds - decline_timer._repower <= BaseRepowerInterval * tmp_slowdown) return;
+   if(level.timeseconds - tmr._repower <= BaseRepowerInterval * tmp_slowdown) return;
    power_reqr_tmp = power_max;
    if(low_repower) power_reqr_tmp = ammo_chg;
    repower_while_fire = !pw_sens_fire;                  // 24-10-17: balance change, trigger hold doesn't prohibit repower
@@ -2387,7 +2579,7 @@ function do_tick_power(float known_batt_deficit){
       // consume_main_cell_heavy(210); // was 28        // 24-02-20: do not eat battery for synth
       synth_chg++;
    }
-   decline_timer._repower = level.timeseconds + more_decline;
+   tmr._repower = level.timeseconds + more_decline;
 }
 
 function apscan_fillscreen(){
@@ -2417,12 +2609,12 @@ function apscan_fillscreen(){
       scandir.pitch+=(vsector/apscan_vertres);                  // iter y
 // these randoms destroying picture strong enough, good for radiation
       if( true                                              && FRand() <= 0.1) continue;
-      if(level.timeseconds - decline_timer._initscan <= 3.0 && FRand() <= 0.2) continue;
-      if(level.timeseconds - decline_timer._initscan <= 5.0 && FRand() <= 0.3) continue;
-      if(level.timeseconds - decline_timer._initscan <= 7.0 && FRand() <= 0.4) continue;
-      if(level.timeseconds - decline_timer._initscan <= 9.0 && FRand() <= 0.5) continue;
-      if(level.timeseconds - decline_timer._initscan <= 12.0 && FRand() <= 0.6) continue;
-//    if(level.timeseconds - decline_timer._initscan <= 20.0 && FRand() >= 0.5){ screendata.data[i] = rand(255); continue; }
+      if(level.timeseconds - tmr._initscan <= 3.0 && FRand() <= 0.2) continue;
+      if(level.timeseconds - tmr._initscan <= 5.0 && FRand() <= 0.3) continue;
+      if(level.timeseconds - tmr._initscan <= 7.0 && FRand() <= 0.4) continue;
+      if(level.timeseconds - tmr._initscan <= 9.0 && FRand() <= 0.5) continue;
+      if(level.timeseconds - tmr._initscan <= 12.0 && FRand() <= 0.6) continue;
+//    if(level.timeseconds - tmr._initscan <= 20.0 && FRand() >= 0.5){ screendata.data[i] = rand(255); continue; }
       EndTrace = StartTrace + 15000 * Vector(scandir);
       a=Trace(HitLoc,HitNor,EndTrace,StartTrace,True);
       dist=vsize(StartTrace-HitLoc);
@@ -2445,9 +2637,9 @@ function do_apscan_clr(){
 
 function do_tick_initscan(){
    if(ena_fast_shield || ena_apscan) return;
-   if(level.timeseconds - decline_timer._initscan < 0.7) return;
+   if(level.timeseconds - tmr._initscan < 0.7) return;
    ena_apscan = true;
-   // decline_timer._unwarnom = level.timeseconds - 4.1; // was disabling long snipermode notify. todo remove apscan-related
+   // tmr._unwarnom = level.timeseconds - 4.1; // was disabling long snipermode notify. todo remove apscan-related
 }
 
 function tick(float f){
@@ -2458,11 +2650,12 @@ function tick(float f){
    if(p == none) return;
    owner_location = p.location;
    owner_viewrotation = p.viewrotation;
+   azm_install_areamap_by_tick(f);           // shitty: installquery wont exec until no owner of aerwpn
    ena_render_scope = (p.weapon == self);
    if(!ena_render_scope) return;
    pw_sens_crouch = p.bIsCrouching;
    do_tick_scan_rssi();
-   debugstr = string(auto_setfov);
+//   debugstr = string(auto_setfov);
    if(!ena_invis) goto skip_invis;
    for(pt=level.pawnlist; pt!=none; pt=pt.nextpawn) if(pt.enemy == p) pt.enemy = none;  // todo slowdown it by fadetime 0.6
    skip_invis:
@@ -2487,8 +2680,8 @@ function tick(float f){
    cap_process_slowdown = (batt_deficit * 4.4) + 1.2;  // was 2.8+1.2
    do_tick_power(batt_deficit);
    do_tick_aim();
-   if(level.timeseconds - decline_timer._redisch >= 0.1){
-      decline_timer._redisch = level.timeseconds;
+   if(level.timeseconds - tmr._redisch >= 0.1){
+      tmr._redisch = level.timeseconds;
       if(ena_invis)              consume_main_cell_heavy(4);
       if(state_forcefield[0]==1) consume_main_cell_heavy(forcefield[0].field_consume_level * 10 * clamp(dist_field[0]/71,1,3)); //was 40
       if(state_forcefield[1]==1) consume_main_cell_heavy(forcefield[1].field_consume_level * 10 * clamp(dist_field[1]/71,1,3));
@@ -2519,7 +2712,7 @@ function tick(float f){
    if((!ava_laser || !ava_ffield || !ava_invis) && aux_oper != 4) aux_validate(true);
    if(true) apscan_fillscreen();
    do_tick_initscan();
-   if(level.timeseconds - decline_timer._redodge <= 0.2) return; // protected by power reqr but necessary anyway, to limit repeatrate
+   if(level.timeseconds - tmr._redodge <= 0.2) return; // protected by power reqr but necessary anyway, to limit repeatrate
    forced = true;
    p.waterspeed = 200;
 }
@@ -2558,7 +2751,7 @@ state Idle{
       do_shutdown_translator();
       do_shutdown_areamap();
       fired = true;
-      if(level.timeseconds - decline_timer._refire < firefactor) return;
+      if(level.timeseconds - tmr._refire < firefactor) return;
       if(ammo_chg<=0) return;
       if(power_chg<=0) return;
       if(!ena_setup && !entering_setup){
@@ -2577,7 +2770,7 @@ state Idle{
       r = rotator(p.location + x*15000 - fireorigin);
       h = spawn(class'aerprjhurtdmg' ,,,fireorigin,r);
       clientfire(f);
-      decline_timer._refire = level.timeseconds;
+      tmr._refire = level.timeseconds;
       if(h == none) return;
       h.w = self; // backward radiolink
       if(level.timeseconds - last_firetime >= 0.5) h.higher_ionize = true;
@@ -2586,7 +2779,7 @@ state Idle{
       h.target_spot = p.location + x*15000;
       h.deaim_rate = deaim_rate;
       if(deaim_rate<deaim_max) deaim_rate++;
-      decline_timer._reaim = level.timeseconds;
+      tmr._reaim = level.timeseconds;
       h.penetrability = clamp(range/128,1,25);  // was range/128
       h.maxpenetrability = h.penetrability;
       h.group = 'AERmuzzleproj';          // only weaponborne projectiles have this, chainspawned are not
@@ -2690,6 +2883,7 @@ function level_setup(){
    assign_spawn_notify('corpse');
    assign_spawn_notify('skproj'); // todo use small projs for skaarjrifle, keep regular skjscouts as usual
    prohibit_conventional_weapons();
+   azm_install_areamap();
    foreach allactors(class'decoration',d) d.bUseMeshCollision=true;
    foreach allactors(class'pawn',p){
       p.bUseMeshCollision=true;
@@ -2835,11 +3029,11 @@ function aer_setup(){
 
 function AERScrollTrigSet(){
    mwheel_trig++;
-   decline_timer._untrig = level.timeseconds;
+   tmr._untrig = level.timeseconds;
 }
 function AERScrollTrigClr(){
    mwheel_trig = 0;
-   decline_timer._untrig = level.timeseconds - 2.0;
+   tmr._untrig = level.timeseconds - 2.0;
 }
 
 function AERScrollProcess(bool dir_up){
@@ -2878,7 +3072,7 @@ function AERScrollProcess(bool dir_up){
       case 4: if(pw_sens_altfire){
 //               ena_auto_powershot = dir_up;   // 2025-01-01: removed. this code allow toggling alt feature
 //               if(ena_auto_powershot){                    // if rightmouse held while AERScrollProcess() call
-//                  decline_timer._unwarnom = level.timeseconds;
+//                  tmr._unwarnom = level.timeseconds;
 //                  aux_oper_msg[1] = "Auto 3x power first shot.";
 //                  warn_opermsg = true;
 //               }
@@ -2890,10 +3084,10 @@ function AERScrollProcess(bool dir_up){
                     else ena_fast_shield = dir_up; // 2026-01-18: reversed mwheel action
                  /* ------------------------------------------- */
                  if(!ena_fast_shield){
-                    decline_timer._unwarnom = level.timeseconds;
+                    tmr._unwarnom = level.timeseconds;
                     aux_oper_msg[1] = "Sniper mode: shield disabled.";
                     warn_opermsg = true;
-                    decline_timer._initscan = level.timeseconds;
+                    tmr._initscan = level.timeseconds;
                  }
                  ena_apscan = false;     // this must be always reset
                  do_apscan_clr();
@@ -2976,7 +3170,7 @@ exec function aerpos(){
 exec function aerwhere(){
    if(!validate_owner_toggle()) return;
    if(!ava_objective) return;
-   decline_timer._unobj = level.timeseconds;
+   tmr._unobj = level.timeseconds;
    ena_objective = true;
 }
 
@@ -2986,8 +3180,8 @@ exec function aerclk(){  // debug
 
 exec function aeremi(){ // debug
    ena_emi = true;
-   decline_timer._reffsta[0] = level.timeseconds - 1.8;
-   decline_timer._reffsta[1] = level.timeseconds - 1.8;
+   tmr._reffsta[0] = level.timeseconds - 1.8;
+   tmr._reffsta[1] = level.timeseconds - 1.8;
    query_forcefield(0,0);
    query_forcefield(1,0);
    collapse_shield();
@@ -3085,8 +3279,8 @@ function query_forcefield(byte nfield,byte newstate){
    local byte field_consume_level,field_consume_horz;
    local float field_w,field_h;
    if(state_forcefield[nfield]==newstate) return;
-   if(level.timeseconds - decline_timer._reffsta[nfield] < 1.7) return;
-   decline_timer._reffsta[nfield] = level.timeseconds;
+   if(level.timeseconds - tmr._reffsta[nfield] < 1.7) return;
+   tmr._reffsta[nfield] = level.timeseconds;
    field_possible = false;
    if(!newstate){
       if(forcefield[nfield]!=none) forcefield[nfield].ena_collapse=true;
@@ -3176,7 +3370,7 @@ function query_forcefield(byte nfield,byte newstate){
 
    }
    if(forcefield[nfield] == none){
-      decline_timer._unwarnom = level.timeseconds;
+      tmr._unwarnom = level.timeseconds;
       aux_oper_msg[0] = "Forcefield sustain impossible:";
       aux_oper_msg[1] = "no EMR or 100% drain in area.";
       warn_opermsg = true;
@@ -3283,7 +3477,7 @@ function performdodge(playerpawn p){
       if(r.pitch > 32768) r.pitch -= 65536;
       if(r.pitch > 3000) p.Velocity.Z = 640;
       forced = false;
-      decline_timer._redodge = level.timeseconds;
+      tmr._redodge = level.timeseconds;
    }
 }
 
@@ -3300,7 +3494,7 @@ function translatorevent FindTransEvent(){
    if(t_res != none){
       transmsg_proximity = true;
       transmsg_last_known = t_res;
-      decline_timer._hidemsg = level.timeseconds;
+      tmr._hidemsg = level.timeseconds;
    }
    return t_res;                                                                  // none if failed
 }
@@ -3318,6 +3512,30 @@ function pawn FindPawn(name t){
    local pawn pt;
    for(pt=level.pawnlist; pt!=none; pt=pt.nextpawn) if(pt.name == t) return pt;
    return none;
+}
+
+function azm_install_areamap_by_tick(float f){
+//   local byte i;
+//   local actor AZM_DataProvider;
+   if(tmr._instmap < 0.0) return;
+   tmr._instmap-=f;
+   if(tmr._instmap > 0.0) return;
+   areamap_datacell = FindAZMD();
+   broadcastmessage("AZM install executed.");
+//   AZM_DataProvider = FindAZMD();
+//   if(AZM_DataProvider == none) return;
+//   if(areamap_datacell == none) return;
+   // ready to copy
+//   for(i=0;i<16380;i++){       // areazone consumer/provider x,y,z
+//      areamap_datacell.SetPropertyText("azc_x["$string(i)$"]",AZM_DataProvider.GetPropertyText("azp_z["$string(i)$"]"));
+//      areamap_datacell.SetPropertyText("azc_y["$string(i)$"]",AZM_DataProvider.GetPropertyText("azp_y["$string(i)$"]"));
+//      areamap_datacell.SetPropertyText("azc_z["$string(i)$"]",AZM_DataProvider.GetPropertyText("azp_z["$string(i)$"]"));
+//   }
+}
+
+function azm_install_areamap(){
+   tmr._instmap = 3.0;
+   broadcastmessage("AZM install queried.");
 }
 
 exec function sci_install_areamap(){
@@ -3348,8 +3566,17 @@ function info FindAMD(){
    return none;
 }
 
+function actor FindAZMD(){
+   local actor a;
+   foreach allactors(class'actor', a){  // todo change to Info
+//     if(!a.isa('knife')) continue;
+     if(instr(caps(string(a.group)),"AREAMAP") != -1) return a;
+   }
+   return none;
+}
+
 function consume_main_cell_heavy(int c_amount){
-   decline_timer._rechrg = level.timeseconds;
+   tmr._rechrg = level.timeseconds;
    if(batt_chg >= c_amount) batt_chg -= c_amount;
     else batt_chg = 0;
 }
@@ -3361,7 +3588,7 @@ function consume_main_cell(int c_amount){
 
 function charge_main_cell(int c_amount){
    if(boost_power) goto skip_batt_cooling;
-   if(level.timeseconds - decline_timer._rechrg < 2.5) return;
+   if(level.timeseconds - tmr._rechrg < 2.5) return;
    skip_batt_cooling:
    if(batt_chg < batt_full) batt_chg += c_amount;
     else batt_chg = batt_full;
@@ -3372,30 +3599,32 @@ function give_aer_slaveitems(){
    local AerAm_core c;
    local AerAm_shard s;
    local AerWk_TDS t;
+   local AerGr_PO mpo;
+//   local actor m;
    if(owner == none) return;
    p = playerpawn(owner);
    if(p == none) return;
    c = AerAM_core(p.findinventorytype(class'AerAm_core'));
    if(c == none){
       c = spawn(class'AerAm_core',,,vect(32767,32767,32767));
-      p.addinventory(c);
-      c.becomeitem();
-      c.gotostate('idle2');
-   }
+      p.addinventory(c); c.becomeitem(); c.gotostate('idle2');   }
    s = AerAM_shard(p.findinventorytype(class'AerAm_shard'));
    if(s == none){
       s = spawn(class'AerAm_shard',,,vect(32767,32767,32767));
-      p.addinventory(s);
-      s.becomeitem();
-      s.gotostate('idle2');
-   }
+      p.addinventory(s); s.becomeitem(); s.gotostate('idle2');   }
    t = AerWk_TDS(p.findinventorytype(class'AerWk_TDS'));
    if(t == none){
       t = spawn(class'AerWk_TDS',,,vect(32767,32767,32767));
-      p.addinventory(t);
-      t.becomeitem();
-      t.gotostate('idle2');
-   }
+      p.addinventory(t); t.becomeitem(); t.gotostate('idle2');   }
+  /* m = AZM_DataCell(p.findinventorytype(class'AZM_DataCell'));
+   if(m == none){
+      m = spawn(class'AZM_DataCell',,,vect(32767,32767,32767));
+      p.addinventory(m); m.becomeitem(); m.gotostate('idle2');   }
+   areamap_datacell = m;*/
+   mpo = none;
+   foreach allactors(class'AerGr_PO',mpo) break;
+   if(mpo==none) mpo = spawn(class'AerGr_PO',,,vect(32767,32767,32767));
+   azm_pawn_overlay = mpo;
    transmsg_receiver = t;
    transmsg_receiver.w = self;
 }
@@ -3431,7 +3660,7 @@ exec function aercfg(){
    if(k != none){ k.w = self; k.aerkey_oper=4; k.mesh=Mesh'aerkey_r';   setup_room_qc++; }
    seq_hello = 0;
    btn_origin = l;
-   decline_timer._readvhello = level.timeseconds;
+   tmr._readvhello = level.timeseconds;
 }
 
 // ----------------------------------------------------------------------------------------------------------------------
@@ -3649,8 +3878,8 @@ function aercfg_advance_hello(){
       aercfg_killkey();
    }
    if(seq_hello >=32) return;
-   if(level.timeseconds - decline_timer._readvhello < 0.2) return;   // textanim speed
-   decline_timer._readvhello = level.timeseconds;
+   if(level.timeseconds - tmr._readvhello < 0.2) return;   // textanim speed
+   tmr._readvhello = level.timeseconds;
    seq_hello++;
    initfail = setup_room_qc < 6;
    if(seq_hello >= 20 && initfail) aercfg_killkey();
@@ -3704,7 +3933,7 @@ defaultproperties{
    clipxdiv2=0.0
    clipydiv2=0.0
    initial_mousesens=0.0
-   decline_timer_unshock=0.0
+   tmr_unshock=0.0
    RClickExecCmdMax=0.16
    RClickChgModeMin=0.25
    RClickChgModeMax=0.5
@@ -3724,6 +3953,7 @@ defaultproperties{
    canvas_finfo=None
    laserdot=None
    laserdotsec=None
+   azm_pawn_overlay=None
    btn_origin=(X=0.0,Y=0.0,Z=0.0)
    pos_objective=(X=0.0,Y=0.0,Z=0.0)
    ava_objective=false
