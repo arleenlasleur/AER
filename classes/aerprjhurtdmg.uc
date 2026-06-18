@@ -369,7 +369,7 @@ function ProcessTouch(actor other, vector hitlocation){   // todo
       else
         other.takeDamage(5, instigator, hitlocation, MomentumTransfer*Normal(Velocity)*mom_incr,      'shot');
    }else
-      damage = clamp(ah.holes,1,50) * dmg_base;  // speeds up in 50 shots, no dist effect, 1000 max
+      damage = clamp(ah.holes,1,20) * dmg_base;  // speeds up in 50 shots, no dist effect, 1000 max
 
    if(p.collisionheight<15.0 && p.collisionradius<30.0)
       other.takeDamage(35, instigator, hitlocation, vect(0,0,0), 'shot'); // suredamage nasty smallpawns

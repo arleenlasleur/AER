@@ -191,6 +191,9 @@
 // lines can be scanned by AER, sit 12-18uu above from floor (ignoring terrain hills)
 
 // todo mechanics.u package, move there all gamerules and stub classes, to keep AER.u for AER features.
+// todo bullets cycloid traj, use interpolation points
+// detect x axis layers of impact (by dist to targs) and mark them on scope. they will be non-uniforn, calc to laser
+// todo wind
 
 #exec obj load file="..\System\UnrealShare.u" package="UnrealShare"
 
@@ -219,10 +222,12 @@
 //#exec audio import file="sounds\aerfire_impact.wav" name="aerfire" package="AER" group="Sound" // 2026-01-17
 //#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire" package="AER" group="Sound" // 2026-01-17
 //..#exec audio import file="sounds\aerfire_legacyb.wav" name="aerfire_reload" package="AER" group="Sound"   // #3, slow rpm
-#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire_reload" package="AER" group="Sound" //was pre2026-01-11
 //..#exec audio import file="sounds\aerfire_impact.wav" name="aerfire" package="AER" group="Sound"   // #4, fast rpm, best
 
+#exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire_reload" package="AER" group="Sound" //was pre2026-01-11
+
 #exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound"
+//#exec audio import file="sounds\XK2-SilenceFire.wav" name="aerfire" package="AER" group="Sound"
 //#exec audio import file="sounds\aerfire_as2laser.wav" name="aerfire" package="AER" group="Sound"
 
 //#exec audio import file="sounds\aerfire_boltdown.wav" name="aerfire" package="AER" group="Sound"
@@ -484,17 +489,18 @@ function processprojectiles(playerpawn p){
 exec function aer_advance_rpm(byte new_grade){ switch(new_grade){
 // --- BSI must be BFI/2 ---------------------------------------------- RPM ---- DOI --------- comment ----------
    case  1: BaseFireInterval=0.240; BaseScrollInterval=0.120; break; // 250  2025-05-20  just assembled
-   case  2: BaseFireInterval=0.186; BaseScrollInterval=0.093; break; // 322  2025-07-27
-   case  3: BaseFireInterval=0.170; BaseScrollInterval=0.085; break; // 352  2025-09-23
-   case  4: BaseFireInterval=0.158; BaseScrollInterval=0.079; break; // 380  2025-07-27  lowest
-   case  5: BaseFireInterval=0.142; BaseScrollInterval=0.071; break; // 420  2025-07-20
-   case  6: BaseFireInterval=0.132; BaseScrollInterval=0.066; break; // 450  2025-06-22
-   case  7: BaseFireInterval=0.124; BaseScrollInterval=0.062; break; // 483  2025-07-07  was pre2026-01-11
-   case  8: BaseFireInterval=0.114; BaseScrollInterval=0.057; break; // 526  unkn        THESE VARS ARE IDEAL, DO NOT TOUCH
-   case  9: BaseFireInterval=0.110; BaseScrollInterval=0.055; break; // 545  2025-08-03
-   case 10: BaseFireInterval=0.094; BaseScrollInterval=0.047; break; // 640  2025-02-01
-   case 11: BaseFireInterval=0.090; BaseScrollInterval=0.045; break; // 666  2025-07-27
-   case 12: BaseFireInterval=0.074; BaseScrollInterval=0.037; break; /* 810  2025-04-22  shit */   }
+   case  2: BaseFireInterval=0.218; BaseScrollInterval=0.109; break; // 275  2026-05-25
+   case  3: BaseFireInterval=0.186; BaseScrollInterval=0.093; break; // 322  2025-07-27
+   case  4: BaseFireInterval=0.170; BaseScrollInterval=0.085; break; // 352  2025-09-23
+   case  5: BaseFireInterval=0.158; BaseScrollInterval=0.079; break; // 380  2025-07-27  lowest
+   case  6: BaseFireInterval=0.142; BaseScrollInterval=0.071; break; // 420  2025-07-20
+   case  7: BaseFireInterval=0.132; BaseScrollInterval=0.066; break; // 450  2025-06-22
+   case  8: BaseFireInterval=0.124; BaseScrollInterval=0.062; break; // 483  2025-07-07  was pre2026-01-11
+   case  9: BaseFireInterval=0.114; BaseScrollInterval=0.057; break; // 526  unkn        THESE VARS ARE IDEAL, DO NOT TOUCH
+   case 10: BaseFireInterval=0.110; BaseScrollInterval=0.055; break; // 545  2025-08-03
+   case 11: BaseFireInterval=0.094; BaseScrollInterval=0.047; break; // 640  2025-02-01
+   case 12: BaseFireInterval=0.090; BaseScrollInterval=0.045; break; // 666  2025-07-27
+   case 13: BaseFireInterval=0.074; BaseScrollInterval=0.037; break; /* 810  2025-04-22  shit */   }
 }
 
 function processtargets(playerpawn p){
@@ -927,6 +933,7 @@ simulated event RenderTexture(ScriptedTexture Tex){
       pc = makecolor(255,255,160);
       tmp_string = "VI";
    }
+   if(low_batt || ena_invis) pc = lowbatt_color(pc);
    tex.drawcoloredtext(239, 239,tmp_string,font'aerfontsma',pc);
 // ------------------------------------------------------------------------------------------------------
 
@@ -979,7 +986,7 @@ simulated event RenderTexture(ScriptedTexture Tex){
       if(penetrability_monitor[i]._full == 0) continue;
       tmp_bool = (penetrability_monitor[i]._rem == 0);
       tmp_byte = tmp_bool ? 2 : penetrability_monitor[i]._full;
-      pc = tmp_bool ? assign_presence_color(true,210,140,210) : assign_presence_color(true,110,110,230);
+      pc = !tmp_bool ? assign_presence_color(true,210,140,210) : assign_presence_color(true,110,110,230);
       tex.DrawTile(65+(i),38-penetrability_monitor[i]._full,2,tmp_byte, 0,0,4,4, texture'aerpixel', false, pc);
    }
    for(i=0;i<penmon_capacity;i++) if(penetrability_monitor[i]._admg > 0){    // death/corpse detect
@@ -4051,8 +4058,8 @@ defaultproperties{
    MultiSkins(2)=Texture'AER.Skin.aermtlb'
    MultiSkins(3)=ScriptedTexture'AER.Disp.aerscreen'
    bCanThrow=false
-   BaseFireInterval=0.158
-   BaseScrollInterval=0.079
+   BaseFireInterval=0.090
+   BaseScrollInterval=0.045
    shakemag=0.0
    shaketime=0.0
    shakevert=0.0
