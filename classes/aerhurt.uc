@@ -60,16 +60,16 @@ function addholes(){   // todo add clamped fatness
    if(p == none) return;
    lasthit_timer = level.timeseconds;
    tmp_apply_damage = 0;
-   if(pending_damage > 120){       // claim undone dmg, 1000 max   // todo downscale it according to accuracy
-      pending_damage -= 120;                                       // accuracy = vsize(hitloc - chest)
-      tmp_apply_damage = 120; // these was 1000                    // penmon.write accuracy instead of apply_dmg
+   if(pending_damage > 20){       // claim undone dmg, 1000 max   // todo downscale it according to accuracy
+      pending_damage -= 20;                                       // accuracy = vsize(hitloc - chest)
+      tmp_apply_damage = 20; // these was 120                     // penmon.write accuracy instead of apply_dmg
    }else{
       tmp_apply_damage = pending_damage;
       pending_damage = 0;
    }
 // p.TakeDamage(tmp_apply_damage, instigator, p.location, 3 * Normal(p.Velocity), 'shot');
    invulner_proof_damage(tmp_apply_damage,p);
-   moveslow_timer = 0.08; // was .11
+   moveslow_timer = 0.04; // was .08
    holes++;
    if(bleed_lifespan <= 0) bleed_lifespan = 0.9;
    bleed_lifespan += 0.2;
@@ -77,12 +77,12 @@ function addholes(){   // todo add clamped fatness
    if(holes > 4 && !bleed_med)    bleed_med  = true;
    if(holes > 7 && !bleed_severe) bleed_severe = true;
    if(holes > 9 && !bleed_fatal)  bleed_fatal = true;
-   if(bleed_mild)   hurt_period=0.40;
-   if(bleed_med)    hurt_period=0.24;
+   if(bleed_mild)   hurt_period=0.37;
+   if(bleed_med)    hurt_period=0.20;
    if(bleed_severe && bleed_lifespan > 2.1) bleed_lifespan = 2.1;
                    if(bleed_lifespan > 1.5) bleed_lifespan = 1.5;
-   if(bleed_severe) hurt_period=0.13;
-   if(bleed_fatal)  hurt_period=0.07;
+   if(bleed_severe) hurt_period=0.11;
+   if(bleed_fatal)  hurt_period=0.05;
 }
 
 function invulner_proof_damage(int ndamage, pawn targ){

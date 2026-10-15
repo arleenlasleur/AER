@@ -18,11 +18,11 @@ class aerprjhurtdmg extends Projectile;
 #exec obj load file="..\System\UnrealI.u" package="UnrealI"  // todo mbshit
 #exec texture import file="textures\skin\aertracer.png" name="aertracer" package="AER" group="Skin" mips=1 flags=0 btc=-2
 
-#exec mesh import mesh="aerbullet3" anivfile="Models\aerbullet3_a.3d" datafile="Models\aerbullet3_d.3d" x=0 y=0 z=0 mlod=0
-#exec mesh origin mesh="aerbullet3" x=0 y=0 z=0
-#exec mesh sequence mesh="aerbullet3" seq=All startframe=0 numframes=1
-#exec meshmap new meshmap="aerbullet3" mesh=aerbullet3
-#exec meshmap scale meshmap="aerbullet3" x=0.06256 y=0.06256 z=0.12512
+//#exec mesh import mesh="aerbullet3" anivfile="Models\aerbullet3_a.3d" datafile="Models\aerbullet3_d.3d" x=0 y=0 z=0 mlod=0
+//#exec mesh origin mesh="aerbullet3" x=0 y=0 z=0
+//#exec mesh sequence mesh="aerbullet3" seq=All startframe=0 numframes=1          // useless, delete
+//#exec meshmap new meshmap="aerbullet3" mesh=aerbullet3
+//#exec meshmap scale meshmap="aerbullet3" x=0.06256 y=0.06256 z=0.12512
 // --------------------------------- used ends ---------------------------------
 
 //#exec mesh import mesh="aerbullet" anivfile="Models\aerbullet_a.3d" datafile="Models\aerbullet_d.3d" x=0 y=0 z=0 mlod=0
@@ -107,9 +107,13 @@ function tick(float f){
 //   tmp_count = tmp_count   << 2;
 //   b4th_trail = tmp_count == trail_count;
 
-   if(vsizesq(prev_location-location) >= 16384){  // each 256uu, was 16
-      trail_count++;
+//   if(vsizesq(fire_location-location) >= 36864 && self.DrawType == DT_None) self.DrawType = DT_Mesh; // show mesh far than 192
+
+   if(vsizesq(prev_location-location) >= 256){  // each 256uu, was 16
+
+//      if(trail_count<=12) self.LightBrightness=(trail_count*21);
       prev_location = location;                                                 // todo move this to weapon, use rotator
+      trail_count++;
  /*     r = rotation;
       deaim_calc = deaim_rate;
       r.yaw   += (FRand() * deaim_calc * 2) - deaim_calc;     
@@ -120,7 +124,7 @@ function tick(float f){
 //      broadcastmessage(speed);
       velocity = vector(r) * speed;                            */
 
-      if(trail_count >= 2 && self.DrawType == DT_None) self.DrawType = DT_Mesh;
+//      if(trail_count >= 2 && self.DrawType == DT_None) self.DrawType = DT_Mesh;
 
 //      if(LightBrightness < 210) LightBrightness = clamp(trail_count,1,210) * 6;
 
@@ -213,8 +217,8 @@ function AERFleshEffects(actor other, vector hitloc, vector momentum){
    if(mo.z > 0) mo.z *= 0.9;
    spawn(class'BloodSplat',,, other.Location, splatRotator);
    for (k=1; k<3; k++) spawn(class'BloodSpray',,,HitLoc, rotator(mo));
-   ag = spawn(class'AerGr_afterglow');
-   if(ag != none) ag.LightBrightness = self.LightBrightness;
+//   ag = spawn(class'AerGr_afterglow');
+//   if(ag != none) ag.LightBrightness = self.LightBrightness;
 }
 
 function Explode(vector HitLocation,vector HitNormal){
@@ -297,8 +301,8 @@ function Explode(vector HitLocation,vector HitNormal){
       if(j<3) b.velocity = vector(rotation) * (default.speed/4); // todo regain speed
    }
    makenoise(1.0);
-   ag = spawn(class'AerGr_afterglow');
-   if(ag != none) ag.LightBrightness = self.LightBrightness;
+//   ag = spawn(class'AerGr_afterglow');
+//   if(ag != none) ag.LightBrightness = self.LightBrightness;
    destroy();
 }
 
@@ -368,8 +372,10 @@ function ProcessTouch(actor other, vector hitlocation){   // todo
         other.takeDamage(5, instigator, hitlocation, MomentumTransfer*Normal(Velocity)*mom_incr_stby, 'shot'); // step1: dmg
       else
         other.takeDamage(5, instigator, hitlocation, MomentumTransfer*Normal(Velocity)*mom_incr,      'shot');
-   }else
+   }else{
       damage = clamp(ah.holes,1,20) * dmg_base;  // speeds up in 50 shots, no dist effect, 1000 max
+      if(penetrability >= 1) penetrability-=1; else penetrability = 0;
+   }
 
    if(p.collisionheight<15.0 && p.collisionradius<30.0)
       other.takeDamage(35, instigator, hitlocation, vect(0,0,0), 'shot'); // suredamage nasty smallpawns
@@ -427,17 +433,28 @@ defaultproperties{
         prev_location=(X=0.0,Y=0.0,Z=0.0)
         fire_location=(X=0.0,Y=0.0,Z=0.0)
         DisableHitsens=False
-        MomentumTransfer=15000
-        speed=10400.0
-        MaxSpeed=10400.0
+        MomentumTransfer=5000
+        speed=13200.0
+        MaxSpeed=13200.0
         // 8000 = 170 m/s
         // 10400 = 220 m/s
+        // 11300 = 240 m/s
         // 13200 = 280 m/s
+        // 15050 = 320 m/s
         // was 22000
         Damage=5.0
         DrawType=DT_None
-//        Mesh=mesh'AER.aerbullet3'
+        Mesh=Mesh'AER.aerlaserblast'
+        MultiSkins(0)=Texture'AER.Mask.aerpixel'
         DrawScale=0.7
         ScaleGlow=3.00000
+
+//        LightType=LT_Steady
+//        LightEffect=LE_NonIncidence
+//        LightBrightness=0
+//        LightHue=170
+//        LightSaturation=195
+//        LightRadius=6
+
         LightType=LT_None
 }

@@ -11,8 +11,8 @@ defaultproperties{
         Damage=5.0
         DrawType=DT_Mesh
         DrawScale=1.3
-        Mesh=Mesh'aerbullet3'
-//        Mesh=Mesh'AER.aerlaserblast'
+//        Mesh=Mesh'aerbullet3'
+        Mesh=Mesh'AER.aerlaserblast'
         MultiSkins(0)=Texture'aertracer'
 //        MultiSkins(0)=Texture'aerscreenbg'
 }

@@ -37,5 +37,5 @@ defaultproperties{
    LightBrightness=0
    LightHue=170
    LightSaturation=195
-   LightRadius=5
+   LightRadius=7
 }

@@ -2,6 +2,11 @@
 // AER - Assault Electromagnetic Rifle, by Arleen Lasleur; orig. concept around Aug 2012, active dev since May 2023
 // ==============================================================================================================================
 // todo autoincrease projspeed, proj starts with visible slow speed + mb mesh, go to 12000+ speed after short delay, +sonic break snd
+// todo invis degrade energyfields
+// todo atmosphereless tunnels (same as machimegun cutspace F2/F1 switch task). same to toxicsmoke. ideal - toxicliquid
+// idea: asmdcore powering area, same as generators in AS2
+//       lased unlockpattern like on phone
+// todo: 2 rounds cut, 3 rounds pause. enable full auto after 4 cuts. release fire allow reach auto faster, with pauses up to 1 round
 
    class AERwpn extends weapon config(aercfg);     // comments hist date format: YYYY-MM-DD
 // bug strange autozoom behavior with fastshield // upd, this is normal due to range behavior
@@ -226,7 +231,9 @@
 
 #exec audio import file="sounds\aerfire_d49cockb.wav" name="aerfire_reload" package="AER" group="Sound" //was pre2026-01-11
 
-#exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound"
+#exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound"   // #3, slow rpm
+//#exec audio import file="sounds\aerfire_legacy.wav" name="aerfire" package="AER" group="Sound"
+//..#exec audio import file="sounds\aerfire_impact2.wav" name="aerfire" package="AER" group="Sound" // ideal for fast .47 rpm
 //#exec audio import file="sounds\XK2-SilenceFire.wav" name="aerfire" package="AER" group="Sound"
 //#exec audio import file="sounds\aerfire_as2laser.wav" name="aerfire" package="AER" group="Sound"
 
@@ -244,6 +251,8 @@
 #exec audio import file="sounds\aerinvsta.wav"   name="aerinvsta"   package="AER" group="Sound"
 #exec audio import file="sounds\aerinvend.wav"   name="aerinvend"   package="AER" group="Sound"
 #exec audio import file="sounds\aerpickup.wav"   name="aerpickup"   package="AER" group="Sound"
+
+#exec audio import file="sounds\aerhvchg.wav"    name="aerhvchg"    package="AER" group="Sound"
 
 #exec mesh import mesh="aerpick" anivfile="Models\aerpick_a.3d" datafile="Models\aerpick_d.3d" x=0 y=0 z=0 mlod=0
 #exec mesh origin mesh="aerpick" x=0 y=0 z=0
@@ -298,7 +307,7 @@ var globalconfig bool   InfiniteAmmo;
 var travel float        BaseFireInterval;
 var travel float        BaseScrollInterval;
 const                   BIOSFireInterval       = 0.180;  // mbshit
-const                   BaseRepowerInterval    = 0.050;  // was .095
+const                   BaseRepowerInterval    = 0.120;  // was .095
 const                   power_max_bot = 22;  // power_max worst/best bounds
 const                   power_max_top = 63;
 var travel byte         power_max;   // was 54 // todo change synth stuff // consume 3x power. deal with blue disp marks
@@ -389,20 +398,25 @@ var AerWk_TDS           transmsg_receiver;
 var translatorevent     transmsg_last_known;          // used by forget process
 // --- radar ---------------------------------------------------------------------------------------------------------------
 const                   radar_max = 8;         // exceeds 255 bytes max static if more // todo mb delete color, save 16 more bytes
+// const                   rbullet_max = 4;
 var globalconfig byte   RadarScanInterval;
 var globalconfig float  RadarScanRadius;
 var byte                radar_qty, radar_vqty;        // total/visible qty
+//                         rbullet_qty, rbullet_vqty;
 struct radar_data     { var int   x, y, r, g, b;      // todo can be shrunken more down to byte. now need int because of -1 stuff.
                         var bool  ena, hit;           // todo mb use colors 250-255 as bitfield instead of flags, for less mem usage
                         var name  t; };               // targ link
 var radar_data          radar[radar_max];             // pivot aiming
+// struct rbullet_data   { var int   x, y;
+//                         var bool  ena; };
+// var rbullet_data        radbullet[rbullet_max];
 struct radarlock_data { var int   x[8], y[8]; };      // these 8 are for t1t2t3t4 b1b2b3b4 dots of collisionbox, not eight targs!
 var radarlock_data      radarlock[radar_max];         // collision box aiming
 var bool                ignore_hitsens_trig, ignore_hitsens_rst;
 var transient array<vector> meshverts;
 var pawn surelock_victim;
 // --- areamap -------------------------------------------------------------------------------------------------------------
-var bool ava_areamap;                                 // area intel is known for current level
+var bool ava_areamap, ava_areamap_nointel;            // area intel/scan is known for current level
 var byte AMI_DataStart;                               // from where to copy data, used for discoverable multiple maps
 var texture AMI_MapTex[63];                           // payload
 var int AMI_AlignX[63],AMI_AlignY[63],AMI_AlignZ[63]; // align
@@ -442,7 +456,7 @@ function calccoords(canvas c){
    canvas_set = true;
 }
 
-function processprojectiles(playerpawn p){
+function processprojectiles(playerpawn p){ // incoming, for danger sensor
    local projectile t;
    local int xp, yp;
    local int dmg;
@@ -504,11 +518,12 @@ exec function aer_advance_rpm(byte new_grade){ switch(new_grade){
 }
 
 function processtargets(playerpawn p){
+     // local aerprjhurtdmg pj; // for bullets/laser radar
         local pawn t;
         local float d;
         local byte i;
         local int xp, yp;
-        local byte radar_cur;
+        local byte radar_cur; // ,rbullet_cur;
         local vector dir, a, abounds[8], dirbounds[8];
         local bool lock;
         local vector x, y, z;
@@ -521,8 +536,47 @@ function processtargets(playerpawn p){
         getaxes(p.viewrotation, x, y, z);
         radar_qty = 0;
         radar_vqty = 0;
+     // rbullet_qty = 0;
+     // rbullet_vqty = 0;
         anylock = false;
         if(newfov == 0) newfov = UserSetFOV;
+// ====================================================================================== bullets radar
+     /* foreach RadiusActors(class'aerprjhurtdmg', pj, RadarScanRadius>>1){
+           a = pj.location;
+           dir = a - p.location;
+           d = vsize(dir);
+           dir /= d;
+           if((dir dot x) < 0.7) continue;
+           xp = ( (dir dot y)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot x);
+           yp = (-(dir dot z)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot x);
+           xp += scale128;
+           yp += scale128;
+           radbullet[rbullet_qty].x=int(xp/scale1);
+           radbullet[rbullet_qty].y=int(yp/scale1);
+           if(rbullet_qty>=rbullet_max) continue;
+           rbullet_cur=rbullet_qty;
+           rbullet_qty++;
+           radbullet[rbullet_cur].ena=true;
+           if(radbullet[rbullet_cur].x<5  || radbullet[rbullet_cur].x>251 ||
+              radbullet[rbullet_cur].y<15 || radbullet[rbullet_cur].y>245) radbullet[rbullet_cur].ena=false;
+           if(radbullet[rbullet_cur].ena) rbullet_vqty++;
+        } */
+     /* if(laserdot != none){
+           a = laserdot.location;
+           dir = a - p.location;
+           d = vsize(dir);
+           dir /= d;
+           if((dir dot x) >= 0.7){
+               xp = ( (dir dot y)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot x);
+               yp = (-(dir dot z)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot x);
+               xp += scale128;
+               yp += scale128;
+               radbullet[0].x=int(xp/scale1);
+               radbullet[0].y=int(yp/scale1);
+               if(rbullet_qty<1) rbullet_qty = 1;
+               radbullet[0].ena=true;
+           }
+        } */
 // ====================================================================================== target radar
         foreach RadiusActors(class'pawn', t, RadarScanRadius){
            if(instr(caps(string(t.group)),"AERTARG") == -1 || t.health <= 0) continue;
@@ -741,6 +795,15 @@ simulated event RenderTexture(ScriptedTexture Tex){
       pc = assign_presence_color(true,246,218,109); //was 227,186,73);
       for(i=0;i<areasign_max_rows;i++) tex.drawcoloredtext(16,82+(i*29), areasign_screendata[i], font'aerfontbig',pc);
    }
+// ====================================================================================== bullet dots
+/* if(ena_areamap || ena_translator || low_batt || ena_invis) goto skip_nobullet;
+   for(i=0;i<rbullet_qty;i++){
+      if(!radbullet[i].ena) continue;
+      pc = makecolor(255,255,255);
+//    if(low_batt || ena_invis) pc = lowbatt_color(pc);
+      tex.DrawTile(radbullet[i].x,radbullet[i].y,2,2, 0,0,4,4, texture'aerpixel', false, pc );
+   }
+   skip_nobullet: */
 // ====================================================================================== radar dots
    if(!snipe || ena_areamap || ena_translator) goto skip_notarg;
    tmp_byte = ((level.timeseconds-tmr._hitsens)>0.1) ? 1 : 0;
@@ -1024,9 +1087,9 @@ simulated event RenderTexture(ScriptedTexture Tex){
    }  */
 // ====================================================================================== area map
    if(ena_areamap){
-//    render_areamap(tex);     // todo set pn.bDirectional as discover flag. introduce discovertrigger.
       render_areamap_new(tex);
-      return;
+      if(ava_areamap) return;
+      if(ava_areamap_nointel) render_areamap(tex);     // todo set pn.bDirectional as discover flag. introduce discovertrigger.
    }
 // ====================================================================================== failed forcefield indicator
    if(warn_opermsg && !ena_translator && !ena_areamap){
@@ -1083,8 +1146,10 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
    if(owner!=none) p = playerpawn(owner);
    if(p == none) return;
    if(!ava_areamap){
+      if(ava_areamap_nointel) return; // secondary map source found
       pc = assign_presence_color(true,246,218,109);
       tex.drawcoloredtext(70,130,"Area is unknown.",font'aerfontsmb',pc);
+      ava_areamap_nointel = true; //???????? todo delay this
       return;
    }
    disp_ox = 0;    disp_w = 256;  disp_hw = (disp_w>>1);      // setup disp
@@ -1156,7 +1221,7 @@ function render_azm(scriptedtexture tex){
    if(newfov == 0) newfov = UserSetFOV;
    foreach level.allactors(class'AZM_Data',zm){
       if(vsizesq(zm.location-owner_location)>=2250000) continue;
-      debugstr = string(zm.name);
+      //debugstr = string(zm.name);
       for(i = 0; i < 242; i++){
          if (zm.CompressedHeights[i] == 255) continue; 
          GlobalIndex = zm.SliceOffset + i;
@@ -1718,6 +1783,10 @@ function do_objective_clr(){
    ena_objective = false;
 }
 
+function ActivateTranslator(bool hs){
+   AERToggleTRanslator();
+}
+
 exec function AERToggleTRanslator(){
    if(!validate_owner_toggle()) return;
    if(trans_msg_areasign) return;
@@ -1774,6 +1843,7 @@ function postrender(canvas c){
 //   return;
    c.setpos(100,70);
 //   debugstr = "hello";
+//   debugstr = "aa="$ava_areamap$" an="$ava_areamap_nointel$" ea="$ena_areamap;
    c.drawtext("Debug: "$debugstr);
 }
 
@@ -2576,6 +2646,7 @@ function do_tick_power(float known_batt_deficit){
    if(power_chg<=0) repower_while_fire = true;  // ???  // kept prohibiting while nonzero ammo, for less display noise
    if(power_chg<power_reqr_tmp && repower_while_fire){
       consume_main_cell_heavy(batt_per_powercap);
+//      playsound(sound'aerhvchg', SLOT_None, 32);  // too small discr for good chg sound, need atleast 44100
       power_chg++;
       if(pw_sens_altfire && fast_shield_chg > 0){
          do_shield_degrade(1);
@@ -2733,9 +2804,8 @@ state Idle{
       if(!entering_setup && ena_setup) return true;
       if(owner == none) return true;
       owner.playsound(sound'aerfire_reload', SLOT_None, 32);
-//      owner.playsound(sound'aerfire', SLOT_None, 32);
       for(i=0;i<5;i++){
-         if(FirePlayers[i]!=none) FirePlayers[i].query_fire();  // 2026-01-11: disabled
+         if(FirePlayers[i]!=none) FirePlayers[i].query_fire();
       }
 /*    tmp_byte = ammo_chg >> 2;                        // 2024-04-15
       tmp_byte = tmp_byte << 2;
@@ -2828,16 +2898,41 @@ simulated function assign_spawn_notify(name msg_type){
    local int asn_qty;
    asn_qty = 0;
    foreach allactors(class'spawnnotify',asn){
-      if(msg_type == 'blood'  &&  asn.isa('AerSN_blood'))   asn_qty++;
-      if(msg_type == 'trail'  &&  asn.isa('AerSN_trail'))   asn_qty++;
-      if(msg_type == 'corpse' &&  asn.isa('AerSN_corpse'))  asn_qty++;
-      if(msg_type == 'skproj' &&  asn.isa('AerSN_skjproj')) asn_qty++;
+      if(msg_type == 'blood'     &&  asn.isa('AerSN_blood'))     asn_qty++;
+      if(msg_type == 'hitblood'  &&  asn.isa('AerSN_hitblood'))  asn_qty++;
+      if(msg_type == 'trail'     &&  asn.isa('AerSN_trail'))     asn_qty++;
+      if(msg_type == 'corpse'    &&  asn.isa('AerSN_corpse'))    asn_qty++;
+      if(msg_type == 'skproj'    &&  asn.isa('AerSN_skjproj'))   asn_qty++;
    }
    if(asn_qty > 0) return;
-      if(msg_type == 'blood')  spawn(class'AerSN_blood');
-      if(msg_type == 'trail')  spawn(class'AerSN_trail');
-      if(msg_type == 'corpse') spawn(class'AerSN_corpse');
-      if(msg_type == 'skproj') spawn(class'AerSN_skjproj');
+      if(msg_type == 'blood')     spawn(class'AerSN_blood');
+      if(msg_type == 'hitblood')  spawn(class'AerSN_hitblood');
+      if(msg_type == 'trail')     spawn(class'AerSN_trail');
+      if(msg_type == 'corpse')    spawn(class'AerSN_corpse');
+      if(msg_type == 'skproj')    spawn(class'AerSN_skjproj');
+}
+
+function mb_replace_tvsp_transevents(){
+   local Triggers tve;
+   local inventory itv;
+   local class<TranslatorEvent> nteclass;
+   local TranslatorEvent nte;
+   local bool bOldGR;
+   nteclass = class<TranslatorEvent>(DynamicLoadObject("UnrealShare.TranslatorEvent", class'Class', true));
+   if(nteclass==none) return;
+   foreach allactors(class'Inventory',itv){
+     if(!itv.isa('TVTranslator')) continue;
+     itv.destroy();
+   }
+   bOldGR = nteclass.Default.bGameRelevant;
+   nteclass.Default.bGameRelevant = true;
+   foreach allactors(class'Triggers',tve){
+     if(!tve.isa('TVTranslatorEvent')) continue;
+     nte = spawn(nteclass,,,tve.location);
+     if(nte==none) continue;
+     nte.message = tve.GetPropertyText("Message");
+   }
+   nteclass.Default.bGameRelevant = bOldGR;
 }
 
 simulated function prohibit_conventional_weapons(){       // AerSN_corpse.uc line 9
@@ -2886,17 +2981,19 @@ function level_setup(){
    local pawn p;
    local byte i;
    assign_spawn_notify('blood');
+//   assign_spawn_notify('hitblood');
 // assign_spawn_notify('trail');
    assign_spawn_notify('corpse');
    assign_spawn_notify('skproj'); // todo use small projs for skaarjrifle, keep regular skjscouts as usual
    prohibit_conventional_weapons();
+   mb_replace_tvsp_transevents();
    azm_install_areamap();
    foreach allactors(class'decoration',d) d.bUseMeshCollision=true;
    foreach allactors(class'pawn',p){
       p.bUseMeshCollision=true;
       p.bAnimByOwner=true;
    }
-   for(i=0;i<3;i++){
+   for(i=0;i<5;i++){
       if(FirePlayers[i]!=none) continue;
       FirePlayers[i] = spawn(class'AerGR_FP',,,location);
       if(FirePlayers[i]!=none) FirePlayers[i].setbase(self);
@@ -3975,6 +4072,7 @@ defaultproperties{
    ena_translator=false
    ena_areamap=false
    ava_areamap=false
+   ava_areamap_nointel=false
    last_scrollproc_updir=false
    aux_oper=1
    tds_oper=1
@@ -4058,8 +4156,10 @@ defaultproperties{
    MultiSkins(2)=Texture'AER.Skin.aermtlb'
    MultiSkins(3)=ScriptedTexture'AER.Disp.aerscreen'
    bCanThrow=false
-   BaseFireInterval=0.090
-   BaseScrollInterval=0.045
+   BaseFireInterval=0.092
+   BaseScrollInterval=0.046
+//   BaseFireInterval=0.182
+//   BaseScrollInterval=0.091
    shakemag=0.0
    shaketime=0.0
    shakevert=0.0
