@@ -420,8 +420,9 @@ var bool ava_areamap, ava_areamap_nointel;            // area intel/scan is know
 var byte AMI_DataStart;                               // from where to copy data, used for discoverable multiple maps
 var texture AMI_MapTex[63];                           // payload
 var int AMI_AlignX[63],AMI_AlignY[63],AMI_AlignZ[63]; // align
+var int AMI_AreaZ[63];                                // floor thickness
 var byte AMI_SHR_factor;                              // bitshift factor (pixel to uu scale)
-var float AMI_FloorHeight;                            // AreaZ height if other than 128
+var float AMI_FloorHeight;                            // legacy
 // --- 3d level-stg areamap ------------------------------------------------------------------------------------------------
 var actor               areamap_datacell;             // this MUST be NOT travel, for autoblanking on new level
 var AerGr_PO            azm_pawn_overlay;             // pawn meshverts shadowcopy
@@ -1149,7 +1150,7 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
       if(ava_areamap_nointel) return; // secondary map source found
       pc = assign_presence_color(true,246,218,109);
       tex.drawcoloredtext(70,130,"Area is unknown.",font'aerfontsmb',pc);
-      ava_areamap_nointel = true; //???????? todo delay this
+//    ava_areamap_nointel = true; //???????? todo delay this
       return;
    }
    disp_ox = 0;    disp_w = 256;  disp_hw = (disp_w>>1);      // setup disp
@@ -1166,9 +1167,11 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
       for(i=0;i<63;i++){                                   // todo mb 1st pass show tex[0], then single z-match. less drawcalls
                                                            // todo  reqiure merged tex for these coords, or "single z" indicator
          if(AMI_MapTex[i] == none) continue;  // mb break here
-         user_z = p.location.z % AMI_FloorHeight;
-         user_z = p.location.z - user_z;
-         is_relevant = (abs(user_z - AMI_AlignZ[i]) <= AMI_FloorHeight);
+//       user_z = p.location.z % AMI_FloorHeight; // old code
+//       user_z = p.location.z - user_z;
+         user_z = p.location.z;
+         is_relevant = (abs(user_z - AMI_AlignZ[i]) <= AMI_AreaZ[i]);
+//       is_relevant = (abs(user_z - AMI_AlignZ[i]) <= AMI_FloorHeight);  // old code
          if(!dimmed_bg && !is_relevant) continue;
          user_x = int(p.location.x) >> AMI_SHR_factor;
          user_y = int(p.location.y) >> AMI_SHR_factor;
@@ -3655,6 +3658,7 @@ exec function sci_install_areamap(){
       self.SetPropertyText("AMI_AlignX["$string(i)$"]",areamap.GetPropertyText("AlignX["$string(i)$"]"));
       self.SetPropertyText("AMI_AlignY["$string(i)$"]",areamap.GetPropertyText("AlignY["$string(i)$"]"));
       self.SetPropertyText("AMI_AlignZ["$string(i)$"]",areamap.GetPropertyText("AlignZ["$string(i)$"]"));
+      self.SetPropertyText( "AMI_AreaZ["$string(i)$"]",areamap.GetPropertyText("AreaZ["$string(i)$"]"));
       j++;
    }
       self.SetPropertyText("AMI_SHR_factor",areamap.GetPropertyText("SHR_factor"));
@@ -3674,7 +3678,7 @@ function actor FindAZMD(){
    local actor a;
    foreach allactors(class'actor', a){  // todo change to Info
 //     if(!a.isa('knife')) continue;
-     if(instr(caps(string(a.group)),"AREAMAP") != -1) return a;
+     if(instr(caps(string(a.group)),"SCI_AREAMAP") != -1) return a;
    }
    return none;
 }
