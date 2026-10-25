@@ -1,6 +1,10 @@
 // ==============================================================================================================================
 // AER - Assault Electromagnetic Rifle, by Arleen Lasleur; orig. concept around Aug 2012, active dev since May 2023
 // ==============================================================================================================================
+//todo areamap
+// spawnable custom location pathnode (and think how to export them from unrealed)
+// custom already-placed pathnodes (ignore most factory-default)
+
 // todo autoincrease projspeed, proj starts with visible slow speed + mb mesh, go to 12000+ speed after short delay, +sonic break snd
 // todo invis degrade energyfields
 // todo atmosphereless tunnels (same as machimegun cutspace F2/F1 switch task). same to toxicsmoke. ideal - toxicliquid
@@ -426,6 +430,52 @@ var float AMI_FloorHeight;                            // legacy
 // --- 3d level-stg areamap ------------------------------------------------------------------------------------------------
 var actor               areamap_datacell;             // this MUST be NOT travel, for autoblanking on new level
 var AerGr_PO            azm_pawn_overlay;             // pawn meshverts shadowcopy
+var float azm_holo_scale;                             // world -> map scale
+const AZM_HOLO_DIST  = 96.0;                          // anchor distance in front of owner (uu)
+const AZM_ORBIT_DIST = 4096.0;                        // virtual observer distance from map center
+const AZM_ALT_SCALE_STEP = 0.001;                     // wheel step for zoom
+const AZM_SCALE_MIN      = 0.002;
+const AZM_SCALE_MAX      = 0.2;
+var float   azm_cam_rate;
+var float   azm_cam_yaw;
+var float   azm_cam_pitch;        // map rotation
+var vector  azm_map_offset;       // world offset of map center (uu)
+var byte azm_cam_ctl_mode;
+const AZM_MODE_HOLD = 4.0;
+var byte   azm_mode_latch;        // last requested mode
+var float azm_mode_latch_t;       // latch timer before reset
+
+const AMVCA_HORZ_DEC = 0;   // map movement modes
+const AMVCA_HORZ_INC = 1;
+const AMVCA_VERT_DEC = 2;   const AMVCP_Y_DEC    = 6;
+const AMVCA_VERT_INC = 3;   const AMVCP_Y_INC    = 7;
+const AMVCP_X_DEC    = 4;   const AMVCP_Z_DEC    = 8;
+const AMVCP_X_INC    = 5;   const AMVCP_Z_INC    = 9;
+
+var pawn                azm_marker_cache[512];        // targets/allies
+var int                 azm_marker_count;
+var int azm_prev_view_yaw, azm_prev_view_pitch;
+var vector AZM_Align;                                 // align
+
+const AZM_SMA_LEN   = 16;
+const AZM_VIEW_WINDOW = 0.3;   // time window to monitor mode
+const AZM_VIEW_THR    = 910;   // min rot to trigger mode chg
+const AZM_VIEW_HYST   = 1.3;
+var int   azm_sma_yaw[AZM_SMA_LEN];
+var int   azm_sma_pitch[AZM_SMA_LEN];
+var int   azm_sma_head;
+var int   azm_sma_fill;
+var bool  azm_alt_autocam;
+var float azm_hold_fwd, azm_hold_back, azm_hold_left, azm_hold_right;
+var float azm_hold_viewup, azm_hold_viewdown;  // aim trackers
+var float azm_hold_yawl, azm_hold_yawr;
+
+var aerprjhurtdmg sens_prj_azm;
+// --- colors --------------------------------------------------------------------------------------------------------------
+var color azm_marker_col_live_enemy;
+var color azm_marker_col_live_friendly;
+var color azm_marker_col_dead_enemy;
+var color azm_marker_col_dead_friendly;
 // --- compass mark related ------------------------------------------------------------------------------------------------
 var vector              pos_objective;
 var bool                ava_objective,
@@ -651,7 +701,7 @@ event RenderOverlays(canvas c){
    if(!canvas_set) calccoords(c);            // for correct radar screen functioning we need to call this at least once
    Texture'aerscreen'.NotifyActor = Self;
    Super.RenderOverlays(c);
-   render_azm_holo(c);
+   render_azm_holo_z(c);
    Texture'aerscreen'.NotifyActor = none;    // disabling this let 3rd players see screen, 'Detached client' otherwise
                                              // this feature require multiple unique textures, like sidisptex
    // todo:
@@ -676,6 +726,30 @@ simulated event RenderTexture(ScriptedTexture Tex){
    if(!ena_render_scope) return;
 // p = playerpawn(owner);    // required for drawportal, or store also owner_rotation (not same as owner_viewrotation)
 // if(p == none) return;                              // or maybe destroy owner_viewrotation.pitch
+
+//------- debug cam control mode ---------------------------------------------------------
+   pc = makecolor(255,255,255);                                           // TODO MOVE DOWN
+   if(!ena_areamap) goto skip_noapscan; // todo rework this
+   switch(azm_cam_ctl_mode){
+      case AMVCA_HORZ_DEC: tmp_string = "HORZ_CCW";  break;
+      case AMVCA_HORZ_INC: tmp_string = "HORZ_CW";   break;
+      case AMVCA_VERT_DEC: tmp_string = "VERT_TOP";  break; case AMVCP_Y_DEC: tmp_string = "Y_RIGHT"; break;
+      case AMVCA_VERT_INC: tmp_string = "VERT_SIDE"; break; case AMVCP_Y_INC: tmp_string = "Y_LEFT";  break;
+      case AMVCP_X_DEC   : tmp_string = "X_THROW";   break; case AMVCP_Z_DEC: tmp_string = "Z_UP";    break;
+      case AMVCP_X_INC   : tmp_string = "X_GRAB";    break; case AMVCP_Z_INC: tmp_string = "Z_DN";    break;
+   }
+   tex.drawcoloredtext(64,122,tmp_string,font'aerfontsma',pc);
+   switch(azm_cam_ctl_mode){
+      case AMVCA_HORZ_DEC: tmp_string = string(azm_cam_yaw); break;
+      case AMVCA_HORZ_INC: tmp_string = string(azm_cam_yaw); break;
+      case AMVCA_VERT_DEC: tmp_string = string(azm_cam_pitch); break;     case AMVCP_Y_DEC: tmp_string = string(azm_map_offset.y); break;
+      case AMVCA_VERT_INC: tmp_string = string(azm_cam_pitch); break;     case AMVCP_Y_INC: tmp_string = string(azm_map_offset.y); break;
+      case AMVCP_X_DEC   : tmp_string = string(azm_map_offset.x); break;  case AMVCP_Z_DEC: tmp_string = string(azm_map_offset.z); break;
+      case AMVCP_X_INC   : tmp_string = string(azm_map_offset.x); break;  case AMVCP_Z_INC: tmp_string = string(azm_map_offset.z); break;
+   }
+   tex.drawcoloredtext(64,142,tmp_string,font'aerfontsma',pc);
+   tex.drawcoloredtext(64,162,"alt_autocam="$azm_alt_autocam,font'aerfontsma',pc);
+
    if(ena_setup){
       RenderSetup(tex);
       return;
@@ -701,7 +775,7 @@ simulated event RenderTexture(ScriptedTexture Tex){
    skip_noapscan:
 // ====================================================================================== arlscan
 //   if(ena_areamap || ena_translator || ena_apscan) goto skip_noarlscan;
-   render_azm_new(tex);
+//   render_azm_new(tex); // todo del
    skip_noarlscan:
 // ====================================================================================== mb portal
 //   tex.Draw3DLine(MakeColor(255,0,255),vect(0,0,0),vect(10,10,10));
@@ -1000,7 +1074,6 @@ simulated event RenderTexture(ScriptedTexture Tex){
    if(low_batt || ena_invis) pc = lowbatt_color(pc);
    tex.drawcoloredtext(239, 239,tmp_string,font'aerfontsma',pc);
 // ------------------------------------------------------------------------------------------------------
-
    pc = assign_presence_color(true,200,200,255);
    d = level.timeseconds - tmr._reclick;                              // shithack, d was used above
    if(pw_sens_altfire && d >= RClickChgModeMin && d < RClickChgModeMax)       pc = assign_presence_color(true,255,0,0);
@@ -1088,9 +1161,9 @@ simulated event RenderTexture(ScriptedTexture Tex){
    }  */
 // ====================================================================================== area map
    if(ena_areamap){
-      render_areamap_new(tex);
-      if(ava_areamap) return;
-      if(ava_areamap_nointel) render_areamap(tex);     // todo set pn.bDirectional as discover flag. introduce discovertrigger.
+//      render_areamap_new(tex);
+//  //    if(ava_areamap) return; // todo ??? wtf, return not allowed here
+//      if(ava_areamap_nointel) render_areamap(tex);     // todo set pn.bDirectional as discover flag. introduce discovertrigger.
    }
 // ====================================================================================== failed forcefield indicator
    if(warn_opermsg && !ena_translator && !ena_areamap){
@@ -1201,222 +1274,265 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
    rotr = (p.viewrotation.yaw+16384) % 65536;    // -90 because zero yaw in unrealed is A of WASD
    if(rotr < 0) rotr += 65536;
    nmarker = byte(rotr/2730.66);
-   tex.DrawTile(119,129,16,16, nmarker*16,0, 16,16, texture'aerbearing', true, pc);    
+   tex.DrawTile(119,129,16,16, nmarker*16,0, 16,16, texture'aerbearing', true, pc);
 }
 
-function render_azm(scriptedtexture tex){
-//   local PlayerPawn P;
-   local AZM_Data zm;
+function render_azm_holo_z(canvas c){
+   local vector xv, yv, zv;  // owner axis for holo dist
+   local vector map_c,       // map center
+    cam_anchor,              // virt canera location
+    cam_fwd,                 // virt camera dir into AZM_Align
+    cam_right, cam_up;       // virt camera y/z axis
+   local vector ox, tmpx, yy, tmpy, tmpz;  // virt camera/yaw-only camera axis
+   local rotator orbit_rot,      // virt camera orbit full rotator
+    yaw_only;                    // for obtain yy, reducable
+   local vector rel,             // relative coords of dots
+    rel_eye;                     // proj for 3d->2d canvas
+   local float  xc, yc, zc,      // proj for dir into virt camera coord sysytem
+    depth;     // ?????
+   local int    xp, yp;          // canvas coords
+   local vector anchor,          // holo dist point
+                mapoff,          // map offset in screen coored
+    dir,                         // dots dir
+    mdir;                        // marker dir
+   local color  pc;              // render color
+   local int    i,               // counters
+    op;                          // orbit tmp pitch
+   local pawn   p;
+   if(owner == none) return;
+   if(!ena_areamap) return; // todo handle ava_areamap
+   if(areamap_datacell == none) return;
+   if(!areamap_datacell.mesh) return;
+   yaw_only = owner_viewrotation;
+   yaw_only.pitch = 0;
+   yaw_only.roll = 0;
+   getaxes(yaw_only, xv, yv, zv);
+   map_c = AZM_Align;                        // virtual observer (independent of player rotation)
+   orbit_rot.Yaw   = int(azm_cam_yaw);
+   op = int(azm_cam_pitch) + 5461;    // side view. was +16384
+   if(op >  12000) op =  12000;   // +66deg; was  16383   /* if(op >  16383) op =  16383; */
+   if(op < -8000)  op = -8000;    // -44deg; was -16384   /* if(op < -16384) op = -16384; */
+   orbit_rot.Pitch = op;
+   orbit_rot.Roll  = 0;
+   GetAxes(orbit_rot, ox, tmpy, tmpz);
+
+   cam_anchor = map_c + ox * AZM_ORBIT_DIST;
+   cam_fwd    = normal(map_c - cam_anchor);
+      
+   yaw_only.Yaw   = orbit_rot.Yaw;
+//   yaw_only.Pitch = 0;  // already 0
+//   yaw_only.Roll  = 0;
+   GetAxes(yaw_only, tmpx, yy, tmpz);
+   cam_right = yy;
+   cam_up    = normal(cam_right cross cam_fwd);
+
+   anchor = owner_location  + xv * AZM_HOLO_DIST;    // final ver
+   mapoff = azm_map_offset.x * xv + azm_map_offset.y * yv + azm_map_offset.z * zv;
+
+   areamap_datacell.allframeverts(meshverts);
+   for(i=0; i<meshverts.size(); i++){
+      rel = meshverts[i] - areamap_datacell.Location; // was -map_c
+      xc = rel dot cam_right;  yc = rel dot cam_up;  zc = rel dot cam_fwd;   // depth preserved -> volume
+
+      // cull: outside virtual camera frustum
+//                            if(zc < 0.0) continue;                                    // behind camera
+//                            if(zc > 0.0001){
+//                               if(abs(xc) > zc * 1)     continue;  // outside horizontal   tan(90fov/2)=1
+//                               if(abs(yc) > zc * 0.577) continue;  // outside vertical     tan(60fov/2)=1
+//                            }
+      
+      dir = anchor + mapoff + xc * azm_holo_scale * yv  + yc * azm_holo_scale * zv  + zc * azm_holo_scale * xv; // screen right/up/depth
+      rel_eye = dir - owner_location;
+      depth = rel_eye dot xv;
+      if(depth <= 1.0) continue; // todo raise to 8.0
+      xp = int( (rel_eye dot yv) * clipxdiv2 / depth + clipxdiv2 );
+      yp = int(-(rel_eye dot zv) * clipxdiv2 / depth + clipydiv2 );
+      if(xp < 0 || xp >= c.ClipX || yp < 0 || yp >= c.ClipY) continue;
+      c.drawcolor = makecolor(120,120,153);
+      c.setpos(xp,yp);  c.drawicon(texture'aerpixel',0.5);
+   }
+   for(i=0; i<azm_marker_count; i++){
+      p = azm_marker_cache[i];
+      if(p == none) continue;
+      rel = p.location - map_c;
+      xc = rel dot cam_right;  yc = rel dot cam_up;  zc = rel dot cam_fwd;
+      mdir = anchor + mapoff + xc * azm_holo_scale * yv  + yc * azm_holo_scale * zv  + zc * azm_holo_scale * xv;
+      rel_eye = mdir - owner_location;
+      depth = rel_eye dot xv;
+      if(depth <= 1.0) continue;
+      xp = int( (rel_eye dot yv) * clipxdiv2 / depth + clipxdiv2 );
+      yp = int(-(rel_eye dot zv) * clipxdiv2 / depth + clipydiv2 );
+      if(xp < 0 || xp >= c.ClipX || yp < 0 || yp >= c.ClipY) continue;
+      if(azm_is_enemy(p)) pc = (p.health > 0) ? azm_marker_col_live_enemy    : azm_marker_col_dead_enemy;
+       else               pc = (p.health > 0) ? azm_marker_col_live_friendly : azm_marker_col_dead_friendly;
+      c.drawcolor = pc;
+      c.setpos(xp,yp);  c.drawicon(texture'aerpixel',1);
+   }
+}
+
+function int AzmDelta(int cur, int prev){
+   local int d;
+   d = cur - prev;
+   if(d >  32767) d -= 65536;
+   if(d < -32768) d += 65536;
+   return d;
+}
+
+function float AzmSmaYaw(int ref_yaw){
+   local int i, sum;
+   if(azm_sma_fill < 2) return 0.0;
+   for(i = 0; i < azm_sma_fill; i++)
+      sum += AzmDelta(azm_sma_yaw[i], ref_yaw);
+   return sum / float(azm_sma_fill);
+}
+
+function float AzmSmaPitch(int ref_pitch){
+   local int i, sum;
+   if(azm_sma_fill < 2) return 0.0;
+   for(i = 0; i < azm_sma_fill; i++)
+      sum += AzmDelta(azm_sma_pitch[i], ref_pitch);
+   return sum / float(azm_sma_fill);
+}
+
+function do_tick_azm_altmap(playerpawn p, float f){
+   local byte fixvar;
+   fixvar = 0;
+   if(!ena_render_scope) return;     // active only while the map is in hand and bExtra1 is held
+// if(p.bExtra1 == 0) return;
+   if(!pw_sens_altfire) return;
+   switch(azm_cam_ctl_mode){
+      case AMVCP_X_DEC: azm_map_offset.x += (azm_cam_rate>>3) * f; fixvar = 1; break;
+      case AMVCP_X_INC: azm_map_offset.x -= (azm_cam_rate>>3) * f; fixvar = 1; break;
+      case AMVCP_Y_DEC: azm_map_offset.y += (azm_cam_rate>>3) * f; fixvar = 2; break;
+      case AMVCP_Y_INC: azm_map_offset.y -= (azm_cam_rate>>3) * f; fixvar = 2; break;
+      case AMVCP_Z_DEC: azm_map_offset.z += (azm_cam_rate>>3) * f; fixvar = 3; break;
+      case AMVCP_Z_INC: azm_map_offset.z -= (azm_cam_rate>>3) * f; fixvar = 3; break;
+      case AMVCA_HORZ_DEC: azm_cam_yaw   += (azm_cam_rate<<3) * f; fixvar = 4; break;
+      case AMVCA_HORZ_INC: azm_cam_yaw   -= (azm_cam_rate<<3) * f; fixvar = 4; break;
+      case AMVCA_VERT_DEC: azm_cam_pitch += (azm_cam_rate<<2) * f; fixvar = 5; break;
+      case AMVCA_VERT_INC: azm_cam_pitch -= (azm_cam_rate<<2) * f; fixvar = 5; break;
+   }
+   switch(fixvar){
+      case 1: azm_map_offset.x = fclamp(azm_map_offset.x, -64.0,  256.0); break;
+      case 2: azm_map_offset.y = fclamp(azm_map_offset.y, -128.0, 128.0); break;
+      case 3: azm_map_offset.z = fclamp(azm_map_offset.z, -128.0, 128.0); break;
+      case 4: azm_cam_yaw = azm_cam_yaw % 65536;                          break;
+      case 5: azm_cam_pitch    = fclamp(azm_cam_pitch,-8000,12000);       break;
+   }
+}
+
+function do_tick_azm_autocam(playerpawn p, float f){
+   local int ref_yaw, ref_pitch;
+   local float dv_yaw_s, dv_pitch_s;
+   local float ap, ay;
+   local byte new_mode;
+
+   if(p == none) return;
+   if(!ena_render_scope) return;
+   if(azm_mode_latch_t > 0) azm_mode_latch_t -= f;  // decay latch
+
+   // TODO: flag "allowed outside map mode" — inserted later, wtf???????????
+
+   // --- 1. write to SMA mem ---
+   azm_sma_yaw[azm_sma_head]   = p.viewrotation.yaw;
+   azm_sma_pitch[azm_sma_head] = p.viewrotation.pitch;
+   azm_sma_head = (azm_sma_head + 1) % AZM_SMA_LEN;
+   if(azm_sma_fill < AZM_SMA_LEN) azm_sma_fill++;
+
+   // --- 2. tracking WASD to timers 
+   if(p.bWasForward) azm_hold_fwd   = AZM_VIEW_WINDOW; else azm_hold_fwd   -= f;
+   if(p.bWasBack)    azm_hold_back  = AZM_VIEW_WINDOW; else azm_hold_back  -= f;
+   if(p.bWasLeft)    azm_hold_left  = AZM_VIEW_WINDOW; else azm_hold_left  -= f;
+   if(p.bWasRight)   azm_hold_right = AZM_VIEW_WINDOW; else azm_hold_right -= f;
+   // --- 3. aim tracking + filter it---
+   dv_yaw_s = 0.0; dv_pitch_s = 0.0;
+   if(azm_sma_fill > 1){
+      ref_yaw   = azm_sma_yaw  [(azm_sma_head - azm_sma_fill + AZM_SMA_LEN) % AZM_SMA_LEN];
+      ref_pitch = azm_sma_pitch[(azm_sma_head - azm_sma_fill + AZM_SMA_LEN) % AZM_SMA_LEN];
+      dv_yaw_s   = AzmSmaYaw(ref_yaw);
+      dv_pitch_s = AzmSmaPitch(ref_pitch);
+   }
+   // --- 4. classify gesture by most aim axis ---
+   ap = abs(dv_pitch_s);
+   ay = abs(dv_yaw_s);
+   if(ap > ay * AZM_VIEW_HYST && ap > AZM_VIEW_THR){
+       if(dv_pitch_s > 0) azm_hold_viewup   = AZM_VIEW_WINDOW; else azm_hold_viewup   -= f;
+       if(dv_pitch_s < 0) azm_hold_viewdown = AZM_VIEW_WINDOW; else azm_hold_viewdown -= f;
+       azm_hold_yawl = 0; azm_hold_yawr = 0;   // reset horz
+   }else if(ay > ap * AZM_VIEW_HYST && ay > AZM_VIEW_THR){
+       if(dv_yaw_s < 0) azm_hold_yawl = AZM_VIEW_WINDOW; else azm_hold_yawl -= f;
+       if(dv_yaw_s > 0) azm_hold_yawr = AZM_VIEW_WINDOW; else azm_hold_yawr -= f;
+       azm_hold_viewup = 0; azm_hold_viewdown = 0; // reset vert
+   }else{   // uncertain zone
+       azm_hold_viewup   -= f;   azm_hold_viewdown -= f;
+       azm_hold_yawl     -= f;   azm_hold_yawr    -= f;
+   }
+   // --- 5. mode decide ---
+   new_mode = AMVCA_HORZ_INC;                    // candidate, default
+   if(azm_hold_fwd   > 0)      new_mode = AMVCP_X_INC;
+   else if(azm_hold_back  > 0) new_mode = AMVCP_X_DEC;
+   else if(azm_hold_left  > 0) new_mode = AMVCP_Y_INC;
+   else if(azm_hold_right > 0) new_mode = AMVCP_Y_DEC;
+   else if(azm_hold_viewup > 0)
+       new_mode = azm_alt_autocam ? AMVCA_VERT_DEC : AMVCP_Z_DEC;
+   else if(azm_hold_viewdown > 0)
+       new_mode = azm_alt_autocam ? AMVCA_VERT_INC : AMVCP_Z_INC;
+   else if(azm_hold_yawl > 0)  new_mode = AMVCA_HORZ_DEC;
+   else if(azm_hold_yawr > 0)  new_mode = AMVCA_HORZ_INC;
+   // --- 6. latch last non-default
+   if(azm_mode_latch_t > 0) azm_mode_latch_t -= f;
+   if(new_mode != AMVCA_HORZ_INC || azm_hold_yawr > 0){         // new gesture != default -> redo latch
+      if(new_mode == azm_mode_latch){   azm_mode_latch_t = AZM_MODE_HOLD; }     // same, reset timer
+       else{ azm_mode_latch = new_mode; azm_mode_latch_t = AZM_MODE_HOLD; }     // other, relatch
+   }
+   if(pw_sens_altfire && azm_mode_latch_t>0) azm_mode_latch_t = AZM_MODE_HOLD; // reset timer on usage
+// if(p.bExtra1 != 0 && azm_mode_latch_t > 0) azm_mode_latch_t = AZM_MODE_HOLD; // reset timer on usage
+   if(azm_mode_latch_t > 0) azm_cam_ctl_mode = azm_mode_latch;                  // apply
+   else                     azm_cam_ctl_mode = AMVCA_HORZ_INC;
+}
+
+function do_tick_azm_markers(){
+   local pawn p;
+   azm_marker_count = 0;
+   if(!ena_render_scope) return;    // move up to keep array while holstering
+   foreach allactors(class'pawn', p){
+      if(p.isa('flockpawn') || p.isa('flockmasterpawn')) continue;
+      if(azm_marker_count >= 512) break;
+      azm_marker_cache[azm_marker_count] = p;
+      azm_marker_count++;
+   }
+}
+
+function bool azm_is_enemy(pawn t){
+   local byte pt;
+   local playerpawn p;
+   local playerreplicationinfo pri;
+   p = playerpawn(owner);
+   if(p == none) return false;
+   if(p.playerreplicationinfo == none) return false; // enemy default if PRI not found
+   pt = p.playerreplicationinfo.team + 1;   // default: not-same team
+/* if(t.isa('playerpawn')){  pri = playerpawn(t).playerreplicationinfo; if(pri != none) pt = pri.team;  }
+   if(t.isa('bot')){         pri = bot(t).playerreplicationinfo;        if(pri != none) pt = pri.team;  }
+                                   ^^^^^^^^ buggy           */
+   // todo handle also attitude
+   pri = t.playerreplicationinfo; if(pri != none) pt = pri.team;
+   if(t != owner && pt != p.playerreplicationinfo.team) return true;
+   return false;
+}
+
+function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime raytracing areamap, don't need data actors, slower
    local vector xv,yv,zv;
    local int i;
    local color pc;
    local vector dir;
    local int xp, yp;
-   local int GlobalIndex, gx, gy;
-   local vector WorldPos;
-   local float UncompressedZ;
-   if (owner==none) return;
-//   P = PlayerPawn(owner);
-//   if (P == none) return;
-   getaxes(owner_viewrotation, xv, yv, zv);
-   // Querying the active live player pawn updates variables in real-time
-//   getaxes(P.ViewRotation, xv, yv, zv);
-   if(newfov == 0) newfov = UserSetFOV;
-   foreach level.allactors(class'AZM_Data',zm){
-      if(vsizesq(zm.location-owner_location)>=2250000) continue;
-      //debugstr = string(zm.name);
-      for(i = 0; i < 242; i++){
-         if (zm.CompressedHeights[i] == 255) continue; 
-         GlobalIndex = zm.SliceOffset + i;
-         gx = GlobalIndex % 22;
-         gy = GlobalIndex / 22;
-         WorldPos.X = zm.GridMinBounds.X + (gx * 48.0);
-         WorldPos.Y = zm.GridMinBounds.Y + (gy * 48.0);
-         // Reconstruct absolute world Z relative to the +384 elevated scanning ceiling
-         UncompressedZ = Float(zm.CompressedHeights[i]) * 4.0;
-         WorldPos.Z = (zm.Location.Z + 384.0) - UncompressedZ;
-       //         UncompressedZ = (Float(zm.CompressedHeights[i]) /*- 96.0 */) * 4.0; // old code
-       //         WorldPos.Z = zm.Location.Z + UncompressedZ;
-         dir = WorldPos - owner.location;
-//         dir /= vsize(dir);
-//         if((dir dot xv) < 0.7) continue;
-         if((dir dot xv) < 1.0) continue;
-         pc = makecolor(120,120,153);
-         if(!fasttrace(WorldPos,owner.location)) pc = makecolor(75,75,96); // behindwall color
-         xp = ( (dir dot yv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
-         yp = (-(dir dot zv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
-//         xp = ( (dir dot yv) / (dir dot xv) ) * (clipxdiv2 / tan(newfov * pi / 360));
-//         yp = (-(dir dot zv) / (dir dot xv) ) * (clipxdiv2 / tan(newfov * pi / 360));
-         xp += scale128;
-         yp += scale128;
-         xp = int(xp/scale1);
-         yp = int(yp/scale1);
-         if(xp<5 || xp>251 || yp<15 || yp>245) continue;
-         if(low_batt || ena_invis) pc = lowbatt_color(pc);
-         tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
-      }
-   }
-}
 
-function render_azm_new(scriptedtexture tex){
-   local vector offset,align,truealign;
-   local vector xv, yv, zv;
-   local color pc;
-   local pawn pt;
-   local vector dir; //, UserLoc; //, DotLoc8, WorldPos;
-   local int xp, yp;
-   local int i;
-   if (owner == none) return;
-
-   if(areamap_datacell==none) return;
-   if(azm_pawn_overlay==none) return;
    getaxes(owner_viewrotation, xv, yv, zv);
    if(newfov == 0) newfov = UserSetFOV;
+   if(!targ.mesh) return;
+   targ.allframeverts(meshverts);
 
-   if(!areamap_datacell.mesh) return;
-   offset = areamap_datacell.location;
-   align.x = -1569.331055;
-   align.y =  482.653351;
-   align.z = -1472.461670;
-
-   if(areamap_datacell.drawscale!=0.08){
-      areamap_datacell.drawscale = 0.08;
-//      areamap_datacell.setlocation(vect(0,0,0));
-   }
-   truealign =  vect(0,0,0);
-   truealign -= offset;
-   truealign += align;
-   truealign /= 0.08;
-
-   areamap_datacell.allframeverts(meshverts);
    for(i=0;i<meshverts.size();i++){
-//         if(i==0) debugstr = string(meshverts[i]);
-//         meshverts[i] += vrand()*2.0; // 0=orig, 2=ok, 7=fuzz
-         dir = /*owner_location -*/ meshverts[i] - owner_location - align; //*10 - truealign;
-//         dir =  truealign;
-
-//         dir += owner_location;
-         dir += vect(0,0,0);
-         // todo
-         // restore scale, do 100% align
-         // no rotate, add camera actor
-         // test with pawns
-         // test added offset
-
-         dir /= vsize(dir);
-         if((dir dot xv) < 0.7) continue;
-         pc = makecolor(120,120,153);   // 200 200 255 too bright              // primary: white color
-         xp = ( (dir dot yv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
-         yp = (-(dir dot zv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
-         xp += scale128;
-         yp += scale128;
-         xp = int(xp/scale1);
-         yp = int(yp/scale1);
-         if(xp<5 || xp>251 || yp<15 || yp>245) continue;
-         if(low_batt || ena_invis) pc = lowbatt_color(pc);
-         tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
-   }
-
-   for(pt=level.pawnlist; pt!=none; pt=pt.nextpawn){
-      if(pt.health<=0) continue;
-      if(pt==owner) continue; // user, do not render
-//      azm_pawn_overlay = pt;
-      azm_pawn_overlay.setlocation(pt.location * 0.08);
-      azm_pawn_overlay.setrotation(pt.rotation);
-      azm_pawn_overlay.Fatness      = pt.Fatness;
-      azm_pawn_overlay.AnimSequence = pt.AnimSequence;
-      azm_pawn_overlay.AnimFrame    = pt.AnimFrame;
-      azm_pawn_overlay.PrePivot     = pt.PrePivot;
-      azm_pawn_overlay.Skin         = pt.Skin;
-      azm_pawn_overlay.Texture      = pt.Texture;
-      azm_pawn_overlay.Mesh         = pt.Mesh;
-      azm_pawn_overlay.DrawScale    = pt.DrawScale * 0.08;
-      azm_pawn_overlay.DrawType     = pt.DrawType;
-      
-      azm_pawn_overlay.allframeverts(meshverts);
-      for(i=0;i<meshverts.size();i++){
-         dir = meshverts[i] - owner_location; // todo: 
-                                              // pawn coords incorrect, translate to 1:1 level and only then downscale
-//         dir /= 0.008;
-  //       dir += owner_location;
-         dir += vect(0,0,0);
-         dir /= vsize(dir);
-         if((dir dot xv) < 0.7) continue;
-         pc = makecolor(153,153,153);                                                                           // undefined
-         if(pt.AttitudeToPlayer==ATTITUDE_Fear){   pc = makecolor(130,130,170); goto skip_done_att_pawncolor; } // insuff. positive
-         if(pt.AttitudeToPlayer==ATTITUDE_Hate ||
-            pt.AttitudeToPlayer==ATTITUDE_Frenzy){ pc = makecolor(255,200,200); goto skip_done_att_pawncolor; } // danger
-         if(pt.AttitudeToPlayer==ATTITUDE_Threaten ||
-            pt.AttitudeToPlayer==ATTITUDE_Ignore){ pc = makecolor(170,130,130); goto skip_done_att_pawncolor; } // insuff. negative
-         if(pt.AttitudeToPlayer==ATTITUDE_Friendly ||
-            pt.AttitudeToPlayer==ATTITUDE_Follow){ pc = makecolor(120,153,120); goto skip_done_att_pawncolor; } // friendly
-         skip_done_att_pawncolor:
-         xp = ( (dir dot yv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
-         yp = (-(dir dot zv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
-         xp += scale128;
-         yp += scale128;
-         xp = int(xp/scale1);
-         yp = int(yp/scale1);
-         if(xp<5 || xp>251 || yp<15 || yp>245) continue;
-         if(low_batt || ena_invis) pc = lowbatt_color(pc);
-         tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
-      }
-   }
-
-}
-
-function render_azm_holo(canvas c){
-    local vector xv, yv, zv;
-    local color pc;
-    local vector dir;
-//    local int xp, yp;
-    local int i;
-    if (owner == none) return;
-
-    if(areamap_datacell==none) return;
-    getaxes(owner_viewrotation, xv, yv, zv);
-    if(newfov == 0) newfov = UserSetFOV;
-
-      if(!areamap_datacell.mesh) return;
-      areamap_datacell.allframeverts(meshverts);
-      for(i=0;i<meshverts.size();i++){
-            dir = meshverts[i] - owner_location; // todo align from rendertex version
-            pc = makecolor(120,120,153);   // 200 200 255 too bright              // primary: white color
-            if(i<10) c.draw3dline(pc,dir,dir+vect(10,10,10)); // working in actual location, todo move this into user room
-//            if(low_batt || ena_invis) pc = lowbatt_color(pc);
- //           tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
-      }
-}
-
-function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime raytracing areamap, don't need data actors, slower
-   local vector /*x,y,z,*/xv,yv,zv;
-//   local rotator r;
-   local int i/*,k*/;
-   local color pc;
-//   local vector ctr_l,hit_n,ctr_etr; // contour trace location
-   local vector dir;
-//   local actor atarg;
-   local int xp, yp;
-
-//   foreach allactors(class'pawn',targ) if(targ.isa('brute')) break;
-
-//   r = rotator(owner_location - targ.location);
-   getaxes(owner_viewrotation, xv, yv, zv);
-   if(newfov == 0) newfov = UserSetFOV;
-//   if(!glob_dbg_once){
-
-      if(!targ.mesh) return;
-      targ.allframeverts(meshverts);
-
-//    for(i=(MeshVerts.Size()-1);i>=0;--i){
-      for(i=0;i<meshverts.size();i++){
-//    for(k=0;k<24;k++){
-//       for(i=0;i<12;i++){
-//          getaxes(r,x,y,z);
-//          ctr_etr = targ.location+(targ.collisionradius+28)*x;
-         // spawn(class'AerGr_laser',,,ctr_etr); // once
-//          atarg = trace(ctr_l,hit_n,targ.location,ctr_etr,true,vect(0,0,0),false);
-         // if(atarg.name != targ.name) continue;
             dir = meshverts[i] - owner.location;
 //          dir = ctr_l - owner.location;
             dir /= vsize(dir);
@@ -1424,56 +1540,19 @@ function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime rayt
             pc = makecolor(120,120,153);   // 200 200 255 too bright              // primary: white color
             if(targ == surelock_victim) pc = makecolor(200,255,200);              // secondary: surelock color
             if(!fasttrace(meshverts[i],owner.location)) pc = makecolor(75,75,96); // tertiary: behindwall color
-//          if(!fasttrace(targ.location,owner.location)) pc = makecolor(255,25,25);
             xp = ( (dir dot yv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
             yp = (-(dir dot zv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
             xp += scale128;
             yp += scale128;
             xp = int(xp/scale1);
             yp = int(yp/scale1);
-          // if(xp<5 || xp>251 || yp<15 || yp>245) continue;
-          // ***************************
-          //    if(pw_sens_altfire && !ena_fast_shield && (pc.g>=36 && pc.b>=36)) pc = makecolor(255,255,255);
-          //    if(radar[i].hit) pc = (tmp_byte==1) ? makecolor(255,255,32) : makecolor(64,64,255);
-          //    if(low_batt || ena_invis) pc = lowbatt_color(pc);
+         // if(xp<5 || xp>251 || yp<15 || yp>245) continue;
+         // if(pw_sens_altfire && !ena_fast_shield && (pc.g>=36 && pc.b>=36)) pc = makecolor(255,255,255);
+         // if(radar[i].hit) pc = (tmp_byte==1) ? makecolor(255,255,32) : makecolor(64,64,255);
+         // if(low_batt || ena_invis) pc = lowbatt_color(pc);
             tex.DrawTile(xp,yp,2,2, 0,0,4,4, texture'aerpixel', false, pc );
-          // ***************************
-//          r.yaw += 2730.666;
-//       }
-//       r.yaw = 0.0;
-//       r.pitch += 2730.666;
-      }
-         // glob_dbg_once = true;
-//   }
-   // *************************** unused
-
- /*  for(i=0;i<4;i++){
-      pn = PawnContourScanners[i];
-      r = rotator(pn.location - targ.location);
-      r.pitch -= 8192;
-      pn.setrotation(r);
-      pc = makecolor(200,200,255);
-      hl = owner_location;
-      hl_tmp = hl;
-      for(i=0;i<16;i++){ // was 16 for livescan
-         tc = pc; // save thisheight color
-         getaxes(r,x,y,z); endtrace = pn.location + 512.0 * x;
-         trace(hl,hn,endtrace,pn.location,true);  // todo determine mover
-         // if(mover) tc = red;
-         hl_tmp = hl;
-//         hl_tmp -= owner_location;
-         hlx = (hl_tmp.x >> 2);  // 3=zoomin 1072 xmax pn, 5=zoomout 4288 xmax
-         hly = (hl_tmp.y >> 2);
-//         hlx /= _scroll; hly /= _scroll;  // variable zoom
-//         hlx+=64; // was 128; // what are these?
-         hly+=97; hly+=41;
-         if(hlx<0 || hlx>255 || hly<41 || hly>236) continue;
-         tex.DrawTile(hlx,hly,1,1, 0,0,4,4, texture'aerpixel', false, tc);
-         r.yaw+=1024;   // was 1365, 48 rays/2pi; rays = 65536/yawdelta
-      }
-   }  */
+   }
 }
-
 
 function render_areamap(scriptedtexture tex){   // realtime raytracing areamap, don't need data actors, slower
    local vector x,y,z,endtrace,hl,hn,hl_tmp;
@@ -1845,9 +1924,7 @@ function postrender(canvas c){
    c.font = canvas_finfo.GetCanvasFont();
 //   return;
    c.setpos(100,70);
-//   debugstr = "hello";
-//   debugstr = "aa="$ava_areamap$" an="$ava_areamap_nointel$" ea="$ena_areamap;
-   c.drawtext("Debug: "$debugstr);
+   c.drawtext(debugstr);
 }
 
 function report_trans_msg_download(){
@@ -2265,7 +2342,6 @@ function do_tick_carry_fireplayers(){
       FirePlayers[i].setbase(self);
    }
 }
-
 
 function do_leash_laser(){
    if(!ena_laser) return;
@@ -2729,14 +2805,16 @@ function tick(float f){
    local float batt_deficit;
    p = playerpawn(Owner);
    if(p == none) return;
+
    owner_location = p.location;
    owner_viewrotation = p.viewrotation;
    azm_install_areamap_by_tick(f);           // shitty: installquery wont exec until no owner of aerwpn
    ena_render_scope = (p.weapon == self);
-   if(!ena_render_scope) return;
+   do_tick_azm_altmap(p, f);
+   do_tick_azm_autocam(p, f);
+   do_tick_azm_markers();
    pw_sens_crouch = p.bIsCrouching;
    do_tick_scan_rssi();
-//   debugstr = string(auto_setfov);
    if(!ena_invis) goto skip_invis;
    for(pt=level.pawnlist; pt!=none; pt=pt.nextpawn) if(pt.enemy == p) pt.enemy = none;  // todo slowdown it by fadetime 0.6
    skip_invis:
@@ -2852,6 +2930,7 @@ state Idle{
       clientfire(f);
       tmr._refire = level.timeseconds;
       if(h == none) return;
+      sens_prj_azm = h;
       h.w = self; // backward radiolink
       if(level.timeseconds - last_firetime >= 0.5) h.higher_ionize = true;
       h.do_ionize();
@@ -3151,6 +3230,12 @@ function AERScrollProcess(bool dir_up){
    p = pawn(owner);
    if(p == none) return;
    if(p.weapon != self) return;
+/*   if(playerpawn(p).bExtra1 != 0 && ena_render_scope){     // alt-map base mode: wheel adjusts map zoom
+      if(dir_up) azm_holo_scale += AZM_ALT_SCALE_STEP;         // todo: move this to alt mode for W/S keys (alt Xdir mode)
+         else    azm_holo_scale -= AZM_ALT_SCALE_STEP;
+      azm_holo_scale = fclamp(azm_holo_scale, AZM_SCALE_MIN, AZM_SCALE_MAX);
+      return;
+   } */
    if(ena_translator) goto ctl_tds;
    if(ena_areamap) goto ctl_areamap;
    /* -------------------------------------------------------------- */  // ctl_weapon, default
@@ -3223,7 +3308,10 @@ function AERScrollProcess(bool dir_up){
    }
    return;
    /* -------------------------------------------------------------- */  ctl_areamap:
-   return;
+   if(dir_up) azm_cam_rate += 64.0;
+    else      azm_cam_rate -= 64.0;
+   azm_cam_rate = fclamp(azm_cam_rate, 256.0, 2048.0);
+// return;
 }
 
 exec function AERScrollUp(){   AERScrollProcess(true);  }
@@ -3258,6 +3346,8 @@ function do_shutdown_translator(){
 }
 function do_shutdown_areamap(){
    ena_areamap = false;
+   azm_sma_fill = 0;
+   azm_sma_head = 0;
 }
 
 exec function AERToggleAreaMap(){
@@ -3530,7 +3620,6 @@ exec function aerforcedodge(){
    p = playerpawn(owner);
    if(p == none) return;
    if(p.weapon != self) return;   // no validate_owner_toggle() call because we need p anyway
-   if(!ava_fast_shield) return;   // 2026-02-22: prevent by noshield due to same power source (fastcap)
    xdir = 0;
    ydir = 0;
    if(p.bwasforward) xdir = 1;
@@ -3538,9 +3627,10 @@ exec function aerforcedodge(){
    if(p.bwasleft)    ydir = 1;
    if(p.bwasright)   ydir = -1;
    if(xdir == 0 && ydir == 0){
-      return;
-      // todo light toggles here
+      azm_alt_autocam = !azm_alt_autocam;
+      return;                                         // todo light toggles here
    }
+   if(!ava_fast_shield) return;   // 2026-02-22: prevent by noshield due to same power source (fastcap)
    if(fast_shield_chg <= shield_per_dodge) return;
    if(!InfiniteDodge) do_shield_degrade(shield_per_dodge);
    performdodge(p);
@@ -3621,6 +3711,7 @@ function pawn FindPawn(name t){
    return none;
 }
 
+exec function azx(){   areamap_datacell.setlocation(vect(32767,32767,32767)); /*AZM_Align = vect(32767,32767,32767);  */ }
 function azm_install_areamap_by_tick(float f){
 //   local byte i;
 //   local actor AZM_DataProvider;
@@ -3628,7 +3719,12 @@ function azm_install_areamap_by_tick(float f){
    tmr._instmap-=f;
    if(tmr._instmap > 0.0) return;
    areamap_datacell = FindAZMD();
-   broadcastmessage("AZM install executed.");
+   broadcastmessage("AZM install executed. "$areamap_datacell);
+   if(areamap_datacell==none) return;
+   self.SetPropertyText("AZM_Align",areamap_datacell.GetPropertyText("LevelOffset"));
+//   areamap_datacell.setlocation(AZM_Align);
+   areamap_datacell.setrotation(rot(0,0,0));
+   areamap_datacell.setlocation(vect(32767,32767,32767));
 //   AZM_DataProvider = FindAZMD();
 //   if(AZM_DataProvider == none) return;
 //   if(areamap_datacell == none) return;
@@ -3643,6 +3739,10 @@ function azm_install_areamap_by_tick(float f){
 function azm_install_areamap(){
    tmr._instmap = 3.0;
    broadcastmessage("AZM install queried.");
+}
+
+exec function sci_install_azm_areamap(){
+   azm_install_areamap();
 }
 
 exec function sci_install_areamap(){
@@ -4016,6 +4116,10 @@ function Destroyed(){
 
 defaultproperties{
    transmsg_receiver=none
+   azm_cam_yaw=0.0
+   azm_cam_pitch=0.0
+   // todo scale maybe bust per-level
+   azm_holo_scale=0.02
    anim_dl=0
    UserSetFOV=106
    bZoomScreen=false
@@ -4162,9 +4266,25 @@ defaultproperties{
    bCanThrow=false
    BaseFireInterval=0.092
    BaseScrollInterval=0.046
-//   BaseFireInterval=0.182
-//   BaseScrollInterval=0.091
    shakemag=0.0
    shaketime=0.0
    shakevert=0.0
+   azm_marker_col_live_enemy=(R=255,G=153,B=85)
+   azm_marker_col_live_friendly=(R=70,G=120,B=255)
+   azm_marker_col_dead_enemy=(R=170,G=132,B=128)
+   azm_marker_col_dead_friendly=(R=90,G=105,B=170)
+   azm_sma_head=0
+   azm_sma_fill=0
+   azm_alt_autocam=false
+   azm_cam_rate=512.0
+   azm_hold_fwd=0.0
+   azm_hold_back=0.0
+   azm_hold_left=0.0
+   azm_hold_right=0.0
+   azm_hold_viewup=0.0
+   azm_hold_viewdown=0.0
+   azm_hold_yawl=0.0
+   azm_hold_yawr=0.0
+   azm_mode_latch=0
+   azm_mode_latch_t=0.0
 }

@@ -239,7 +239,7 @@ function Explode(vector HitLocation,vector HitNormal){
    GetAxes(Rotation,X,Y,Z);
    foreach radiusactors(class'aerffieldblk',fwall,40) hitffield = true;
 // atarg = Trace(hitloc_u,hitnor_u, hitlocation + 24*x, hitlocation - 16*x,True);  // trace -16 from hitloc again to obtain actor
-   TraceSurfHitInfo(hitlocation-16*x,hitlocation+24*x,,,,j,,atarg);  // shit name bu we clean this var later
+   TraceSurfHitInfo(hitlocation-16*x,hitlocation+24*x,,,,j,,atarg);  // shit name but we clean this var later
    did_penmon_write = false;
    traceactor_grp = caps(string(atarg.group));
    if(((j & PF_FakeBackdrop) != 0) || atarg.isa('aerlaserdistractor') ||
@@ -303,6 +303,7 @@ function Explode(vector HitLocation,vector HitNormal){
    makenoise(1.0);
 //   ag = spawn(class'AerGr_afterglow');
 //   if(ag != none) ag.LightBrightness = self.LightBrightness;
+   if(w!=none) w.sens_prj_azm = none;
    destroy();
 }
 
