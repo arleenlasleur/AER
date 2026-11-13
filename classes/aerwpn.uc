@@ -286,10 +286,10 @@ var bool                ena_apscan;                     // for init delay
 // --- zoom, FOV, mouse, timers --------------------------------------------------------------------------------------------
 var globalconfig int    UserSetFOV;   // todo make this automatic. calc necess fov from clipx/clipy ratio
 struct aertimers      {
-    var float    _refire,     _reaim,      _unsnipe,    _unfeel,     _redodge,    _reammo,     _repower,  _hitsens,
+  var float      _refire,     _reaim,      _unsnipe,    /*_unfeel,*/     _redodge,    _reammo,     _repower,  _hitsens,
     _instmap,    _showmsg,    _hidemsg,    _dlmsg,      _reclick,    _unwarnom,   _unwarnaux,  _repush,   _readvhello,
-                 _rescan,     _releash,    _refeature,  _clrpenmon,  _unspanff,   _reffsta[2], _sh_cap,   _sh_dmgdec,
-                 _redisch,    _rechrg,     _unobj,      _untrig,     _rerssi,     _initscan,   _reaz_in,  _reaz_out; };
+    _rereact,    _rescan,     _releash,    _refeature,  _clrpenmon,  _unspanff,   _reffsta[2], _sh_cap,   _sh_dmgdec,
+    _reaccept,   _redisch,    _rechrg,     _unobj,      _untrig,     _rerssi,     _initscan,   _reaz_in,  _reaz_out; };
 var bool                ava_synth, boost_power;     // faster flags todo replace 'boost_power' with int powersrc_level
 var bool                bZoomScreen;
 var aertimers           tmr;
@@ -417,7 +417,8 @@ var radar_data          radar[radar_max];             // pivot aiming
 struct radarlock_data { var int   x[8], y[8]; };      // these 8 are for t1t2t3t4 b1b2b3b4 dots of collisionbox, not eight targs!
 var radarlock_data      radarlock[radar_max];         // collision box aiming
 var bool                ignore_hitsens_trig, ignore_hitsens_rst;
-var transient array<vector> meshverts;
+var /*transient*/ array<vector> meshverts;
+var transient array<vector> pawnverts;
 var pawn surelock_victim;
 // --- areamap -------------------------------------------------------------------------------------------------------------
 var bool ava_areamap, ava_areamap_nointel;            // area intel/scan is known for current level
@@ -429,7 +430,22 @@ var byte AMI_SHR_factor;                              // bitshift factor (pixel 
 var float AMI_FloorHeight;                            // legacy
 // --- 3d level-stg areamap ------------------------------------------------------------------------------------------------
 var actor               areamap_datacell;             // this MUST be NOT travel, for autoblanking on new level
-var AerGr_PO            azm_pawn_overlay;             // pawn meshverts shadowcopy
+//var string accept_mapdata;
+//var array<vector> azm_level_points;
+//var int           azm_level_points_qty;
+var int           meshverts_qty;         // todo rename it
+var int    readbuff_meshverts_seek;  // read pointer
+var int    readbuff_mapdata_qty;     // requested to read by data actor
+var int    readbuff_entry_qty;       // = mapdata / 128
+var string readbuff_meshverts;       // raw data
+
+var int current_line_idx;
+var int current_char_idx;
+var int total_vectors_decoded;
+var string b64_lookup;
+var bool ena_accept_mapdata;
+
+var bool azm_fixed_yaw;
 var float azm_holo_scale;                             // world -> map scale
 const AZM_HOLO_DIST  = 96.0;                          // anchor distance in front of owner (uu)
 const AZM_ORBIT_DIST = 4096.0;                        // virtual observer distance from map center
@@ -440,6 +456,10 @@ var float   azm_cam_rate;
 var float   azm_cam_yaw;
 var float   azm_cam_pitch;        // map rotation
 var vector  azm_map_offset;       // world offset of map center (uu)
+var vector  azm_pivot_comp;          // geometric center of map (t3d space), = world - AZM_Align
+var bool    azm_pivot_enable,     // auto-compensation toggle
+            azm_pivot_done;       // pivot recompute done for level
+
 var byte azm_cam_ctl_mode;
 const AZM_MODE_HOLD = 4.0;
 var byte   azm_mode_latch;        // last requested mode
@@ -470,7 +490,40 @@ var float azm_hold_fwd, azm_hold_back, azm_hold_left, azm_hold_right;
 var float azm_hold_viewup, azm_hold_viewdown;  // aim trackers
 var float azm_hold_yawl, azm_hold_yawr;
 
+const AZM_REACTOR_MAX = 256;       // more needs more mem, then need to split array, more complicated code
+const AZM_REACTOR_PTS = 64;        // 16x16uu surface resolution
+const AZM_REACTOR_PTSxMAX = 16384; // max adressable
+
+struct azm_reactor {
+   var name     mover_name;     // linked mover name
+   var mover    mover_ref;      // resolved
+   var trigger  trig_ref;
+   var bool     is_lift;        // 1=OK_Lift, 0=OK_Door
+   var bool     is_unlocked;    // true if openable
+   var bool     is_opened;      // true if trespassable
+   var vector   center;         // X,Y,Z
+   var vector   lift_offset;    // center minus KeyPos[0]
+   var vector   center_now;     // actual pivot for lift anim
+   var rotator  rot;            // Yaw,Pitch,Roll
+   var float    width, height;  // W,H
+   var byte     last_keynum;     // lifts-related
+   var byte     prev_frame;
+   var float    segment_start_t;
+   var float    phase;
+};
+var azm_reactor azm_reactors[AZM_REACTOR_MAX];   // NOT transient, NOT travel
+var int         azm_reactors_n;                  // todo rename this to azm_reactors_data
+
+var transient vector azm_pts[AZM_REACTOR_PTSxMAX];
+var transient int    azm_pts_n[AZM_REACTOR_MAX];
+
+var int readbuff_reactors_qty;
+var string readbuff_reactors;
+
 var aerprjhurtdmg sens_prj_azm;
+// --- reactors ------------------------------------------------------------------------------------------------------------
+var int          azm_overlay_count;
+var float        azm_lift_phase[512];
 // --- colors --------------------------------------------------------------------------------------------------------------
 var color azm_marker_col_live_enemy;
 var color azm_marker_col_live_friendly;
@@ -1223,7 +1276,7 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
       if(ava_areamap_nointel) return; // secondary map source found
       pc = assign_presence_color(true,246,218,109);
       tex.drawcoloredtext(70,130,"Area is unknown.",font'aerfontsmb',pc);
-//    ava_areamap_nointel = true; //???????? todo delay this
+//    ava_areamap_nointel = true; //??? todo delay this
       return;
    }
    disp_ox = 0;    disp_w = 256;  disp_hw = (disp_w>>1);      // setup disp
@@ -1278,6 +1331,7 @@ function render_areamap_new(scriptedtexture tex){     //256x196 from 0,41
 }
 
 function render_azm_holo_z(canvas c){
+//    local bool dbg;
    local vector xv, yv, zv;  // owner axis for holo dist
    local vector map_c,       // map center
     cam_anchor,              // virt canera location
@@ -1287,9 +1341,15 @@ function render_azm_holo_z(canvas c){
    local rotator orbit_rot,      // virt camera orbit full rotator
     yaw_only;                    // for obtain yy, reducable
    local vector rel,             // relative coords of dots
-    rel_eye;                     // proj for 3d->2d canvas
+                rel_eye,           // proj for 3d->2d canvas
+                rel_own;           // rel of owner
    local float  xc, yc, zc,      // proj for dir into virt camera coord sysytem
-    depth;     // ?????
+    depth;     // ???
+
+    local int   r_i, p_i;        // reactors-related
+    local vector r_loc ; //, r_ax, r_ay, r_az; // todo del
+    local rotator r_rot;
+
    local int    xp, yp;          // canvas coords
    local vector anchor,          // holo dist point
                 mapoff,          // map offset in screen coored
@@ -1299,29 +1359,35 @@ function render_azm_holo_z(canvas c){
    local int    i,               // counters
     op;                          // orbit tmp pitch
    local pawn   p;
+
    if(owner == none) return;
-   if(!ena_areamap) return; // todo handle ava_areamap
-   if(areamap_datacell == none) return;
-   if(!areamap_datacell.mesh) return;
+//   if(!ena_areamap) return; // todo handle ava_areamap
+
+   if(meshverts_qty==0) return;
+   if(meshverts_qty < readbuff_mapdata_qty) return;   // cause immediate map appear without data read progress effect,
+                                      // but ensure correct pivot align without map hull jumping after all data loaded
    yaw_only = owner_viewrotation;
    yaw_only.pitch = 0;
    yaw_only.roll = 0;
    getaxes(yaw_only, xv, yv, zv);
    map_c = AZM_Align;                        // virtual observer (independent of player rotation)
-   orbit_rot.Yaw   = int(azm_cam_yaw);
+   orbit_rot.Yaw = !azm_fixed_yaw ? int(azm_cam_yaw) : owner_viewrotation.yaw-32768;
    op = int(azm_cam_pitch) + 5461;    // side view. was +16384
-   if(op >  12000) op =  12000;   // +66deg; was  16383   /* if(op >  16383) op =  16383; */
-   if(op < -8000)  op = -8000;    // -44deg; was -16384   /* if(op < -16384) op = -16384; */
+// if(op >  12000) op =  12000;   // +66deg; was  16383   /* if(op >  16383) op =  16383; */  // old code
+
+//   if(op >  6400)  op =  6400;  // dont do any effect on higher than 6400
+//   if(op < -8000)  op = -8000;    // -44deg; was -16384   /* if(op < -16384) op = -16384; */
+
    orbit_rot.Pitch = op;
    orbit_rot.Roll  = 0;
    GetAxes(orbit_rot, ox, tmpy, tmpz);
 
    cam_anchor = map_c + ox * AZM_ORBIT_DIST;
-   cam_fwd    = normal(map_c - cam_anchor);
-      
+   cam_fwd = normal(map_c - cam_anchor);
+
    yaw_only.Yaw   = orbit_rot.Yaw;
-//   yaw_only.Pitch = 0;  // already 0
-//   yaw_only.Roll  = 0;
+// yaw_only.Pitch = 0;  // already 0
+// yaw_only.Roll  = 0;
    GetAxes(yaw_only, tmpx, yy, tmpz);
    cam_right = yy;
    cam_up    = normal(cam_right cross cam_fwd);
@@ -1329,29 +1395,76 @@ function render_azm_holo_z(canvas c){
    anchor = owner_location  + xv * AZM_HOLO_DIST;    // final ver
    mapoff = azm_map_offset.x * xv + azm_map_offset.y * yv + azm_map_offset.z * zv;
 
-   areamap_datacell.allframeverts(meshverts);
-   for(i=0; i<meshverts.size(); i++){
-      rel = meshverts[i] - areamap_datacell.Location; // was -map_c
+   if(azm_pivot_enable){
+      xc = azm_pivot_comp dot cam_right;
+      yc = azm_pivot_comp dot cam_up;
+      zc = azm_pivot_comp dot cam_fwd;
+      mapoff += (xc * yv + yc * zv + zc * xv) * azm_holo_scale;
+   }
+
+   c.style = erenderstyle.sty_translucent;
+   rel_own = owner_location - AZM_Align;
+
+   for(i=0; i<meshverts_qty; i++){                                       // pass 1: BSP map
+      rel = meshverts[i] - AZM_Align; //areamap_datacell.Location; // was -map_c  // todo: use align data, location WILL be wrong
       xc = rel dot cam_right;  yc = rel dot cam_up;  zc = rel dot cam_fwd;   // depth preserved -> volume
 
       // cull: outside virtual camera frustum
 //                            if(zc < 0.0) continue;                                    // behind camera
 //                            if(zc > 0.0001){
 //                               if(abs(xc) > zc * 1)     continue;  // outside horizontal   tan(90fov/2)=1
-//                               if(abs(yc) > zc * 0.577) continue;  // outside vertical     tan(60fov/2)=1
+//                               if(abs(yc) > zc * 0.577) continue;  // outside vertical     tan(60fov/2)=.577
 //                            }
       
       dir = anchor + mapoff + xc * azm_holo_scale * yv  + yc * azm_holo_scale * zv  + zc * azm_holo_scale * xv; // screen right/up/depth
       rel_eye = dir - owner_location;
       depth = rel_eye dot xv;
       if(depth <= 1.0) continue; // todo raise to 8.0
-      xp = int( (rel_eye dot yv) * clipxdiv2 / depth + clipxdiv2 );
+
+
+//    xp = int( (rel_eye dot yv) * clipxdiv2 / depth + clipxdiv2 );
+      xp = int( clipxdiv2 - (rel_eye dot yv) * clipxdiv2 / depth ); // new code
       yp = int(-(rel_eye dot zv) * clipxdiv2 / depth + clipydiv2 );
       if(xp < 0 || xp >= c.ClipX || yp < 0 || yp >= c.ClipY) continue;
-      c.drawcolor = makecolor(120,120,153);
+
+      c.drawcolor = (abs(rel.z - rel_own.z) < 80.0)  // todo change to const
+          ? makecolor(200,200,255)   // mathz floor map, highlight
+          : makecolor(120,120,153);  // regular map
+
+//      c.drawcolor = makecolor(120,120,153);
+
+
       c.setpos(xp,yp);  c.drawicon(texture'aerpixel',0.5);
    }
-   for(i=0; i<azm_marker_count; i++){
+   for(r_i = 0; r_i < azm_reactors_n; r_i++){          // pass 2: reactors
+      if(azm_pts_n[r_i] <= 0) continue;
+      r_loc = azm_reactors[r_i].center;
+      r_rot = azm_reactors[r_i].rot;
+      for(p_i = 0; p_i < azm_pts_n[r_i]; p_i++){   // pts are already world coords, so no need to GetAxes for transform
+//       if( (p_i%3 != 0) &&       // skip density by open/nondoor state
+//          ( azm_reactors[r_i].is_opened || azm_reactors[r_i].is_lift ) ) continue;
+
+         rel = (azm_reactors[r_i].center_now - azm_reactors[r_i].center // prevent double absolute delta
+            + azm_pts[r_i * AZM_REACTOR_PTS + p_i]) - AZM_Align;
+         xc = rel dot cam_right;  yc = rel dot cam_up;  zc = rel dot cam_fwd;
+         dir = anchor + mapoff + xc * azm_holo_scale * yv  + yc * azm_holo_scale * zv  + zc * azm_holo_scale * xv;
+         rel_eye = dir - owner_location;
+         depth = rel_eye dot xv;
+         if(depth <= 1.0) continue;
+//         xp = int( (rel_eye dot yv) * clipxdiv2 / depth + clipxdiv2 );
+         xp = int( clipxdiv2 - (rel_eye dot yv) * clipxdiv2 / depth ); // new code
+         yp = int(-(rel_eye dot zv) * clipxdiv2 / depth + clipydiv2 );
+         if(xp < 0 || xp >= c.ClipX || yp < 0 || yp >= c.ClipY) continue;
+         if(azm_reactors[r_i].is_lift)        pc = makecolor(120,180,120);   // color by state
+          else{                               pc = makecolor(180,120,120);  // default: closed
+            if(azm_reactors[r_i].is_unlocked) pc = makecolor(120,180,120);
+            if(azm_reactors[r_i].is_opened)   pc = makecolor(120,120,180);  }
+         c.drawcolor = pc;
+         c.setpos(xp, yp);  c.drawicon(texture'aerpixel', 0.5);
+      }
+   }
+   c.style = erenderstyle.sty_normal;
+   for(i=0; i<azm_marker_count; i++){                                       // pass 3: pawns
       p = azm_marker_cache[i];
       if(p == none) continue;
       rel = p.location - map_c;
@@ -1360,7 +1473,8 @@ function render_azm_holo_z(canvas c){
       rel_eye = mdir - owner_location;
       depth = rel_eye dot xv;
       if(depth <= 1.0) continue;
-      xp = int( (rel_eye dot yv) * clipxdiv2 / depth + clipxdiv2 );
+//    xp = int( (rel_eye dot yv) * clipxdiv2 / depth + clipxdiv2 );
+      xp = int( clipxdiv2 - (rel_eye dot yv) * clipxdiv2 / depth ); // new code
       yp = int(-(rel_eye dot zv) * clipxdiv2 / depth + clipydiv2 );
       if(xp < 0 || xp >= c.ClipX || yp < 0 || yp >= c.ClipY) continue;
       if(azm_is_enemy(p)) pc = (p.health > 0) ? azm_marker_col_live_enemy    : azm_marker_col_dead_enemy;
@@ -1400,6 +1514,7 @@ function do_tick_azm_altmap(playerpawn p, float f){
    if(!ena_render_scope) return;     // active only while the map is in hand and bExtra1 is held
 // if(p.bExtra1 == 0) return;
    if(!pw_sens_altfire) return;
+   if(!ena_areamap) return; // contol only in map mode
    switch(azm_cam_ctl_mode){
       case AMVCP_X_DEC: azm_map_offset.x += (azm_cam_rate>>3) * f; fixvar = 1; break;
       case AMVCP_X_INC: azm_map_offset.x -= (azm_cam_rate>>3) * f; fixvar = 1; break;
@@ -1413,11 +1528,11 @@ function do_tick_azm_altmap(playerpawn p, float f){
       case AMVCA_VERT_INC: azm_cam_pitch -= (azm_cam_rate<<2) * f; fixvar = 5; break;
    }
    switch(fixvar){
-      case 1: azm_map_offset.x = fclamp(azm_map_offset.x, -64.0,  256.0); break;
-      case 2: azm_map_offset.y = fclamp(azm_map_offset.y, -128.0, 128.0); break;
+      case 1: azm_map_offset.x = fclamp(azm_map_offset.x, -128.0, 640.0); break;
+      case 2: azm_map_offset.y = fclamp(azm_map_offset.y, -320.0, 320.0); break;
       case 3: azm_map_offset.z = fclamp(azm_map_offset.z, -128.0, 128.0); break;
       case 4: azm_cam_yaw = azm_cam_yaw % 65536;                          break;
-      case 5: azm_cam_pitch    = fclamp(azm_cam_pitch,-8000,12000);       break;
+      case 5: azm_cam_pitch    = fclamp(azm_cam_pitch,-8000,6400);        break;
    }
 }
 
@@ -1431,7 +1546,7 @@ function do_tick_azm_autocam(playerpawn p, float f){
    if(!ena_render_scope) return;
    if(azm_mode_latch_t > 0) azm_mode_latch_t -= f;  // decay latch
 
-   // TODO: flag "allowed outside map mode" — inserted later, wtf???????????
+   // TODO: flag "allowed outside map mode" ï¿½ inserted later, wtf ???
 
    // --- 1. write to SMA mem ---
    azm_sma_yaw[azm_sma_head]   = p.viewrotation.yaw;
@@ -1530,16 +1645,16 @@ function render_pawn_contour(scriptedtexture tex, pawn targ){   // realtime rayt
    getaxes(owner_viewrotation, xv, yv, zv);
    if(newfov == 0) newfov = UserSetFOV;
    if(!targ.mesh) return;
-   targ.allframeverts(meshverts);
+   targ.allframeverts(pawnverts);
 
-   for(i=0;i<meshverts.size();i++){
-            dir = meshverts[i] - owner.location;
+   for(i=0;i<pawnverts.size();i++){
+            dir = pawnverts[i] - owner.location;
 //          dir = ctr_l - owner.location;
             dir /= vsize(dir);
             if((dir dot xv) < 0.7) continue;
             pc = makecolor(120,120,153);   // 200 200 255 too bright              // primary: white color
             if(targ == surelock_victim) pc = makecolor(200,255,200);              // secondary: surelock color
-            if(!fasttrace(meshverts[i],owner.location)) pc = makecolor(75,75,96); // tertiary: behindwall color
+            if(!fasttrace(pawnverts[i],owner.location)) pc = makecolor(75,75,96); // tertiary: behindwall color
             xp = ( (dir dot yv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
             yp = (-(dir dot zv)) * (clipxdiv2 / tan(newfov * pi / 360)) / (dir dot xv);
             xp += scale128;
@@ -2407,32 +2522,9 @@ function do_tick_decide_autozoom(){
     old_auto_zoomfactor = auto_zoomfactor;
    auto_zoomfactor = 10;
    if(!pw_sens_altfire) goto ready_autonewzoom;
-
 //   priorange = surelock ? range_targ : range;
 //   priorange = range;
    priorange = anylock ? range_targ : range;
-/*   if(priorange > 520)  auto_zoomfactor=2;
-   if(priorange > 690)  auto_zoomfactor=3;
-   if(priorange > 1130) auto_zoomfactor=4;
-   if(priorange > 1673) auto_zoomfactor=5;
-   if(priorange > 2400) auto_zoomfactor=6;
-   if(priorange > 3700) auto_zoomfactor=7;
-   if(priorange > 5446) auto_zoomfactor=8;
-   if(priorange > 7733) auto_zoomfactor=9; */
-
-   /*
-    65:   ;   73:   ;   81:   ;   90:   ;   98:   ;  106:   ;  117:   ;  133:   ;  148:   ;  163:  0
- 179:  1;  194:  2;  210:  3;  225:  4;  241:  5;  256:  6;  272:  7;  290:  8;  313:  9;  335: 10
- 358: 11;  381: 12;  404: 13;  427: 14;  450: 15;  472: 16;  495: 17;  518: 18;  547: 19;  577: 20
- 608: 21;  639: 22;  670: 23;  700: 24;  731: 25;  762: 26;  793: 27;  824: 28;  858: 29;  898: 30
- 937: 31;  977: 32; 1016: 33; 1055: 34; 1095: 35; 1134: 36; 1174: 37; 1213: 38; 1259: 39; 1309: 40
-1358: 41; 1407: 42; 1456: 43; 1505: 44; 1554: 45; 1604: 46; 1653: 47; 1708: 48; 1769: 49; 1829: 50
-1889: 51; 1950: 52; 2010: 53; 2071: 54; 2131: 55; 2193: 56; 2267: 57; 2341: 58; 2414: 59; 2488: 60
-2562: 61; 2636: 62; 2710: 63; 2791: 64; 2881: 65; 2972: 66; 3062: 67; 3153: 68; 3243: 69; 3334: 70
-3483: 71; 3550: 72; 3662: 73; 3774: 74; 3887: 75; 3999: 76; 4134: 77; 4276: 78; 4419: 79; 4561: 80
-4704: 81; 4886: 82; 5075: 83; 5263: 84; 5453: 85; 5723: 86; 5992: 87; 6306: 88; 6761: 89; 7733: 90
-   */
-
     if(priorange < 335){
        auto_zoomfactor = 10;
        goto ready_autonewzoom;
@@ -2456,19 +2548,11 @@ function do_tick_decide_autozoom(){
       auto_zoomfactor = old_auto_zoomfactor;
       auto_zoomfactor--;
    } 
-//   fov_offset = 1.0 / priorange;
-//   auto_newfov = fclamp((UserSetFOV*10)/auto_zoomfactor, 8.0, UserSetFOV);
-
    auto_oldfov = auto_setfov;
    if(level.timeseconds - tmr._reaz_in > 0.030){
       tmr._reaz_in = level.timeseconds;
-//      if(auto_oldfov > auto_newfov) auto_setfov -= 0.1;
       auto_setfov = fclamp((UserSetFOV*20)/auto_zoomfactor, 8.0, UserSetFOV);
    }
-/*   if(level.timeseconds - tmr._reaz_out > 0.020){
-      tmr._reaz_out = level.timeseconds;
-      if(auto_oldfov < auto_newfov) auto_setfov += 0.1;
-   } */
 }
 
 function do_tick_shield_capacitor(){
@@ -2799,6 +2883,43 @@ function do_tick_initscan(){
    // tmr._unwarnom = level.timeseconds - 4.1; // was disabling long snipermode notify. todo remove apscan-related
 }
 
+function do_tick_reactors(float f){
+   local int    i;
+   local float  t;
+   local vector p_from, p_where;
+   local bool safe_m,safe_t;
+
+   tmr._rereact -= f;
+   if(tmr._rereact > 0) return;
+   tmr._rereact = 0.05;
+   t = Level.TimeSeconds;
+
+   for(i=0; i<azm_reactors_n; i++){
+      safe_m = azm_reactors[i].mover_ref != none;
+      safe_t = azm_reactors[i].trig_ref  != none;
+      if(safe_t) azm_reactors[i].is_unlocked = azm_reactors[i].trig_ref.bInitiallyActive; // status
+      if(safe_m) azm_reactors[i].is_opened   = azm_reactors[i].mover_ref.keynum != 0;
+      if(!azm_reactors[i].is_lift){ azm_reactors[i].center_now = azm_reactors[i].center; continue; } // treat OK_door still
+      if(!safe_m ) continue;  // corrupt reactor mem
+
+      if(azm_reactors[i].mover_ref.KeyNum != azm_reactors[i].last_keynum){
+         azm_reactors[i].prev_frame      = azm_reactors[i].last_keynum;
+         azm_reactors[i].last_keynum     = azm_reactors[i].mover_ref.KeyNum;
+         azm_reactors[i].segment_start_t = t;
+      }
+
+      if(azm_reactors[i].mover_ref.MoveTime > 0.0)
+         azm_reactors[i].phase = (t - azm_reactors[i].segment_start_t) / azm_reactors[i].mover_ref.MoveTime;
+       else
+         azm_reactors[i].phase = 1.0;
+      if(azm_reactors[i].phase > 1.0) azm_reactors[i].phase = 1.0;
+
+      p_from  = azm_reactors[i].mover_ref.KeyPos[azm_reactors[i].prev_frame];
+      p_where = azm_reactors[i].mover_ref.KeyPos[azm_reactors[i].mover_ref.KeyNum];
+      azm_reactors[i].center_now = azm_reactors[i].lift_offset + p_from + (p_where - p_from) * azm_reactors[i].phase;
+   }
+}
+
 function tick(float f){
    local playerpawn p;
    local pawn pt;
@@ -2810,8 +2931,10 @@ function tick(float f){
    owner_viewrotation = p.viewrotation;
    azm_install_areamap_by_tick(f);           // shitty: installquery wont exec until no owner of aerwpn
    ena_render_scope = (p.weapon == self);
+   do_tick_accept_mapdata();
    do_tick_azm_altmap(p, f);
    do_tick_azm_autocam(p, f);
+   do_tick_reactors(f);
    do_tick_azm_markers();
    pw_sens_crouch = p.bIsCrouching;
    do_tick_scan_rssi();
@@ -3063,7 +3186,7 @@ function level_setup(){
    local pawn p;
    local byte i;
    assign_spawn_notify('blood');
-//   assign_spawn_notify('hitblood');
+// assign_spawn_notify('hitblood');
 // assign_spawn_notify('trail');
    assign_spawn_notify('corpse');
    assign_spawn_notify('skproj'); // todo use small projs for skaarjrifle, keep regular skjscouts as usual
@@ -3141,7 +3264,7 @@ exec function AERToggleScreen(){
 
 function aer_setup(){
    local bool wcfg;
-   local byte i;
+   local int i;
    give_aer_slaveitems();
    wcfg = false;
    // --------------------------------------------------------------------------------------------------------------
@@ -3158,6 +3281,9 @@ function aer_setup(){
    for(i=0;i<2;i++) aux_oper_msg[i] = "";
    setup_menu_hdr = "";
    for(i=0;i<7;i++) setup_menu_line[i] = "";
+   // --------------------------------------------------------------------------------------------------------------
+   azm_overlay_count = 0;
+   for(i=0;i<512;i++) azm_lift_phase[i] = 0.0;
    // --------------------------------------------------------------------------------------------------------------
    if(transmsg_receiver==none){
       for(i=0;i<translator_max_rows;i++)                    // blank message buffer
@@ -3181,6 +3307,11 @@ function aer_setup(){
      "than reference counting in the    "
      "case of infrequent deletion."         */
    }
+   // --------------------------------------------------------------------------------------------------------------
+    b64_lookup = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+;";
+    current_line_idx = 0;
+    current_char_idx = 0;
+    total_vectors_decoded = 0;
    // --------------------------------------------------------------------------------------------------------------
    for(i=0;i<radar_max;i++){
       radar[i].x=0; radar[i].y=0; radar[i].r=0; radar[i].g=0; radar[i].b=0;
@@ -3355,6 +3486,7 @@ exec function AERToggleAreaMap(){
    if(trans_msg_areasign) return;
    do_shutdown_translator();
    ena_areamap = !ena_areamap;
+   if(ena_areamap) azm_ensure_reactor_pts();
 }
 
 exec function aerpos(){
@@ -3711,10 +3843,15 @@ function pawn FindPawn(name t){
    return none;
 }
 
-exec function azx(){   areamap_datacell.setlocation(vect(32767,32767,32767)); /*AZM_Align = vect(32767,32767,32767);  */ }
+exec function azmfix(){
+   azm_fixed_yaw=!azm_fixed_yaw;
+}
+
+exec function azmfixp(){
+   azm_pivot_enable = !azm_pivot_enable;
+}
+
 function azm_install_areamap_by_tick(float f){
-//   local byte i;
-//   local actor AZM_DataProvider;
    if(tmr._instmap < 0.0) return;
    tmr._instmap-=f;
    if(tmr._instmap > 0.0) return;
@@ -3723,17 +3860,15 @@ function azm_install_areamap_by_tick(float f){
    if(areamap_datacell==none) return;
    self.SetPropertyText("AZM_Align",areamap_datacell.GetPropertyText("LevelOffset"));
 //   areamap_datacell.setlocation(AZM_Align);
-   areamap_datacell.setrotation(rot(0,0,0));
-   areamap_datacell.setlocation(vect(32767,32767,32767));
-//   AZM_DataProvider = FindAZMD();
-//   if(AZM_DataProvider == none) return;
-//   if(areamap_datacell == none) return;
-   // ready to copy
-//   for(i=0;i<16380;i++){       // areazone consumer/provider x,y,z
-//      areamap_datacell.SetPropertyText("azc_x["$string(i)$"]",AZM_DataProvider.GetPropertyText("azp_z["$string(i)$"]"));
-//      areamap_datacell.SetPropertyText("azc_y["$string(i)$"]",AZM_DataProvider.GetPropertyText("azp_y["$string(i)$"]"));
-//      areamap_datacell.SetPropertyText("azc_z["$string(i)$"]",AZM_DataProvider.GetPropertyText("azp_z["$string(i)$"]"));
-//   }
+//   areamap_datacell.setrotation(rot(0,0,0));
+
+   azm_harvest_holomap(areamap_datacell); //old code // todo: move azm_harvest_holomap() inside this func
+   azm_pivot_done          = false;
+   azm_pivot_enable        = false;
+   azm_pivot_comp          = vect(0,0,0);
+   meshverts_qty           = 0;
+   readbuff_meshverts_seek = 0;
+   ena_accept_mapdata      = true;   
 }
 
 function azm_install_areamap(){
@@ -3743,6 +3878,290 @@ function azm_install_areamap(){
 
 exec function sci_install_azm_areamap(){
    azm_install_areamap();
+}
+
+function do_tick_accept_mapdata(){                     // queued reading
+
+        local string curr_line;
+        local int line_len;
+//        local int iterations_this_tick;
+        
+        local int c0, c1, c2, c3, c4, c5, c6, c7;
+        local int b0, b1, b2, b3, b4, b5;
+        local int x_raw, y_raw, z_raw;
+        local vector temp_vector;
+        local float progress;
+
+   if(!ena_accept_mapdata) return;
+   if(areamap_datacell == none) return;
+   
+   // 0: finish task if done reading
+   if(meshverts_qty >= readbuff_mapdata_qty){
+      ena_accept_mapdata = false;
+      if(!azm_pivot_done && meshverts_qty > 0){ azm_recompute_pivot_comp(); azm_pivot_done = true; }
+      return;
+   }
+
+   // 1: EOF (insuff/corrupt MapData)
+   if(readbuff_meshverts_seek >= readbuff_entry_qty){
+      ena_accept_mapdata = false;
+      if(!azm_pivot_done && meshverts_qty > 0){ azm_recompute_pivot_comp(); azm_pivot_done = true; }
+      return;
+   }
+   
+   // 2: parse another line
+   self.setPropertyText("readbuff_meshverts",areamap_datacell.getPropertyText("MapData["$readbuff_meshverts_seek$"]"));
+// if(readbuff_meshverts_seek>16384 || meshverts_qty>=readbuff_mapdata_qty) return; // do not read if array full or have verts
+   curr_line = readbuff_meshverts;
+   line_len  = Len(curr_line);
+
+   // 3: finish task if EOL at 0
+   if(line_len == 0){
+      ena_accept_mapdata = false;
+      if(!azm_pivot_done && meshverts_qty > 0){ azm_recompute_pivot_comp(); azm_pivot_done = true; }
+      return;
+   }
+
+   // 4: unpack 8 base64 to 1 vect
+   current_char_idx = 0;
+   while((current_char_idx + 8) <= line_len && meshverts_qty < readbuff_mapdata_qty){ // new code
+// while( current_char_idx      <  line_len && meshverts_qty < readbuff_mapdata_qty){
+//   for(current_char_idx=0;current_char_idx<line_len;current_char_idx++){  //  && total_vectors_decoded < vector_total_count)  // wtf? already true
+      progress = (float(meshverts_qty) / float(readbuff_mapdata_qty)) * 100.0;
+
+      c0 = GetB64Val(Mid(curr_line, current_char_idx,     1)); // extr 8 char of base64
+      c1 = GetB64Val(Mid(curr_line, current_char_idx + 1, 1));
+      c2 = GetB64Val(Mid(curr_line, current_char_idx + 2, 1));
+      c3 = GetB64Val(Mid(curr_line, current_char_idx + 3, 1));
+      c4 = GetB64Val(Mid(curr_line, current_char_idx + 4, 1));
+      c5 = GetB64Val(Mid(curr_line, current_char_idx + 5, 1));
+      c6 = GetB64Val(Mid(curr_line, current_char_idx + 6, 1));
+      c7 = GetB64Val(Mid(curr_line, current_char_idx + 7, 1));
+      b0 = ((c0 & 0x3F) << 2) | ((c1 >> 4) & 0x03); // reassemble into 6 big-endian bytes
+      b1 = ((c1 & 0x0F) << 4) | ((c2 >> 2) & 0x0F);
+      b2 = ((c2 & 0x03) << 6) | ( c3       & 0x3F);
+      b3 = ((c4 & 0x3F) << 2) | ((c5 >> 4) & 0x03);
+      b4 = ((c5 & 0x0F) << 4) | ((c6 >> 2) & 0x0F);
+      b5 = ((c6 & 0x03) << 6) | ( c7       & 0x3F);
+      // assemble to int      // recover int sign
+      x_raw = (b0 << 8) | b1; if((x_raw & 32768) != 0) x_raw = x_raw | -65536;
+      y_raw = (b2 << 8) | b3; if((y_raw & 32768) != 0) y_raw = y_raw | -65536;
+      z_raw = (b4 << 8) | b5; if((z_raw & 32768) != 0) z_raw = z_raw | -65536;
+      temp_vector.X = x_raw;
+      temp_vector.Y = y_raw;
+      temp_vector.Z = z_raw;
+//              WriteToGrid(total_vectors_decoded, temp_vector);
+      meshverts[meshverts_qty] = temp_vector + AZM_Align;
+      meshverts_qty++;
+      current_char_idx += 8;
+   }
+   // 5: same as 0:, but this code cant be removed, otherwise buggy
+   if(meshverts_qty >= readbuff_mapdata_qty){
+      ena_accept_mapdata = false;
+      if(!azm_pivot_done && meshverts_qty > 0){ azm_recompute_pivot_comp(); azm_pivot_done = true; }
+      return;
+   }
+
+   // 6: advance data buffer to next line; out of bounds = insufficient data
+   readbuff_meshverts_seek++;
+   if(readbuff_meshverts_seek >= readbuff_entry_qty){
+      ena_accept_mapdata = false;
+      if(!azm_pivot_done && meshverts_qty > 0){ azm_recompute_pivot_comp(); azm_pivot_done = true; }
+   }
+}
+
+function azm_recompute_pivot_comp(){
+   local int i;
+   local vector bb_min, bb_max, c;
+   broadcastmessage("recomppivot query");
+   azm_pivot_comp = vect(0,0,0);  // todo ensure this will be 0 then travel to next level
+   azm_pivot_enable = false;
+   if(meshverts_qty == 0) return;
+   bb_min = meshverts[0]; bb_max = meshverts[0];
+   for(i = 1; i < meshverts_qty; i++){
+      bb_min.x = fmin(bb_min.x, meshverts[i].x);  bb_max.x = fmax(bb_max.x, meshverts[i].x);
+      bb_min.y = fmin(bb_min.y, meshverts[i].y);  bb_max.y = fmax(bb_max.y, meshverts[i].y);
+      bb_min.z = fmin(bb_min.z, meshverts[i].z);  bb_max.z = fmax(bb_max.z, meshverts[i].z);
+   }
+   c = (bb_min + bb_max) * 0.5;   // geometric center in brush space (= world - AZM_Align)
+   // real geom center must sit in holo origin; world offset = c (world uu coords),
+   // in holo-space: c * azm_holo_scale (out axes line up: xv/yv/zv from cam_right/up/fwd)
+   azm_pivot_comp = -(c - AZM_Align);
+   azm_pivot_enable = true;
+
+/*          debugstr = "qty=" $ meshverts_qty $ "/" $ readbuff_mapdata_qty $
+                   " bbmin=" $ bb_min $ " bbmax=" $ bb_max $
+                   " c=" $ azm_pivot_comp $" |bb|="$vsize(bb_max-bb_min); */
+broadcastmessage("recomppivot done");
+   
+}
+
+function azm_harvest_holomap(actor ahm_data){          // oneshot reading
+   local int i, n;
+//   ahm_data.AllFrameVerts(meshverts);  // inherit dotcloud
+
+   self.setPropertyText("readbuff_mapdata_qty",ahm_data.getPropertyText("MapData_qty"));    // parse meshverts qty
+   readbuff_entry_qty = ceil(readbuff_mapdata_qty/128.0);
+
+   self.setPropertyText("readbuff_reactors_qty",ahm_data.getPropertyText("ReactorData_qty"));    // parse reactors
+   n = readbuff_reactors_qty;
+   if(n > AZM_REACTOR_MAX) n = AZM_REACTOR_MAX;
+   azm_reactors_n = 0;
+   for(i = 0; i < n; i++){
+      if(!azm_parse_reactor_row(ahm_data.getPropertyText("ReactorData["$i$"]"), azm_reactors_n)) continue;
+      azm_reactors[azm_reactors_n].last_keynum     = 0;  // init phase for parsed
+      azm_reactors[azm_reactors_n].prev_frame      = 0;
+      azm_reactors[azm_reactors_n].segment_start_t = Level.TimeSeconds;
+      azm_reactors[azm_reactors_n].phase           = 1.0;
+      azm_reactors[azm_reactors_n].center_now      = azm_reactors[azm_reactors_n].center;
+      if(azm_reactors[azm_reactors_n].mover_ref != none){
+         azm_reactors[azm_reactors_n].last_keynum = azm_reactors[azm_reactors_n].mover_ref.KeyNum;
+         azm_reactors[azm_reactors_n].prev_frame  = azm_reactors[azm_reactors_n].mover_ref.KeyNum;
+         azm_reactors[azm_reactors_n].center_now  = azm_reactors[azm_reactors_n].lift_offset // use actual pos if nonzero keynum
+              + azm_reactors[azm_reactors_n].mover_ref.KeyPos[azm_reactors[azm_reactors_n].mover_ref.KeyNum];
+      }
+      azm_reactors_n++;
+   }
+   for(i = 0; i < AZM_REACTOR_MAX; i++) azm_pts_n[i] = 0;
+}
+
+function bool azm_parse_reactor_row(string row, int idx){
+   local string f[10];
+   local int    i, p, pos;
+   local mover  mv;
+   local trigger tr;
+   // ============================================ empty nonparsed template ==
+   f[0] = "?";            // name
+   f[1] = "2";            // bIsLift
+   f[2] = "?"; f[3] = "?"; f[4] = "?";   // center
+   f[5] = "?"; f[6] = "?"; f[7] = "?";   // rot
+   f[8] = "?"; f[9] = "?";               // width, height
+   // =============================================================== parse ==
+   p = 0;
+   while(p < 10){
+      pos = InStr(row, ";");
+      if(pos == -1){
+         f[p] = row;     // tail
+         p++;
+         break;
+      }
+      f[p] = Left(row, pos);
+      row  = Mid(row, pos + 1);
+      p++;
+   }
+   // ============================================================ validate ==
+   if(p < 10)                     return false; // less than 10 ents
+   if(f[1] != "0" && f[1] != "1") return false; // bIsLift
+   for(i=2;i<=9;i++)
+      if(!azm_valid_field(f[i], 32767)) return false;
+/*   if(!azm_valid_field(f[2], 32767)) return false;    // old code
+   if(!azm_valid_field(f[3], 32767)) return false;
+   if(!azm_valid_field(f[4], 32767)) return false;
+   if(!azm_valid_field(f[5], 32767)) return false;
+   if(!azm_valid_field(f[6], 32767)) return false;
+   if(!azm_valid_field(f[7], 32767)) return false;
+   if(!azm_valid_field(f[8], 32767)) return false;
+   if(!azm_valid_field(f[9], 32767)) return false;*/
+   if(float(f[8]) <= 0.0 || float(f[9]) <= 0.0) return false;   // skip by zero W/H
+   if(f[0] == "?" || len(f[0]) == 0)            return false;   // skip by empty mover handle
+   // ============================================== all valid, safe to use ==
+   azm_reactors[idx].is_lift    = (f[1] == "1");
+   azm_reactors[idx].center.x   = float(f[2]);
+   azm_reactors[idx].center.y   = float(f[3]);
+   azm_reactors[idx].center.z   = float(f[4]);
+   azm_reactors[idx].center_now = azm_reactors[idx].center;   // center for keynum 0
+   azm_reactors[idx].rot.Yaw    = int(f[5]);
+   azm_reactors[idx].rot.Pitch  = int(f[6]);
+   azm_reactors[idx].rot.Roll   = int(f[7]);
+   azm_reactors[idx].width      = float(f[8]);
+   azm_reactors[idx].height     = float(f[9]);
+   mv = none;
+   foreach AllActors(class'Mover', mv){ if(string(mv.Name) == f[0]) break; mv = none; }
+   azm_reactors[idx].mover_ref = mv;
+   azm_reactors[idx].lift_offset = vect(0,0,0);                       // default reactor vs mover pivot offset - zero
+   if(mv==none)                          return true; // don't handle uncontrolled
+   azm_reactors[idx].lift_offset = azm_reactors[idx].center - mv.KeyPos[0]; // track real mover pivot offset if able
+   if(!mv.isInState('TriggerControl'))   return true; // ignore non-trigger states
+   if(!mv.isInState('TriggerToggle'))    return true;
+   if(!mv.isInState('TriggerOpenTimed')) return true;
+   foreach AllActors(class'Trigger', tr){ if(mv.tag == tr.event) break; tr = none; }
+   azm_reactors[idx].trig_ref = tr;
+   return true;
+}
+
+function bool azm_valid_field(string s, int bound){
+   local int i;
+   if(len(s) == 0) return false;
+   for(i = (Left(s,1) == "-") ? 1 : 0; i < len(s); i++){
+      if(mid(s, i, 1) < "0" || mid(s, i, 1) > "9") return false;
+   }
+   if(float(s) >  float(bound)) return false;
+   if(float(s) < -float(bound)) return false;
+   return true;
+}
+
+function float azm_surface_min_dist(int idx){
+  return 64.0 * 1.15 / 3;
+// ///    local float area, target;
+// ///    local int   want;
+// ///    area = azm_reactors[idx].width * azm_reactors[idx].height;
+// ///    if(area <= 0.0) return 1.0;
+// ///    want = (int(sqrt(area)) >> 2);
+// /// //   want *= 0.01;  // todo adj
+// ///    want = clamp(want, 16, AZM_REACTOR_PTS);
+// ///    target = area / want;
+// /// //   return sqrt(target) * 0.7;    // todo adjust this
+// ///    return sqrt(target) * 2.8;
+}
+
+function azm_regen_reactor_pts(int idx){
+   local vector  ax, ay, az, cand;
+   local float   min_dist;
+   local int     j, n, attempt;
+   local bool    ok;
+   local vector  loc /*, ploc */ ;
+   local rotator r;
+   loc = azm_reactors[idx].center;
+   r   = azm_reactors[idx].rot;
+   GetAxes(r, ax, ay, az);
+   min_dist = azm_surface_min_dist(idx);
+   log("REGEN idx="$idx$" want_md="$min_dist$" area="$azm_reactors[idx].width
+       *azm_reactors[idx].height$" iters=0");   // debug
+   n = 0;
+   for(attempt = 0; attempt < AZM_REACTOR_PTS * 8 && n < AZM_REACTOR_PTS; attempt++){
+      cand = loc
+           + ay * (FRand() * azm_reactors[idx].width  - azm_reactors[idx].width  * 0.5)
+           + az * (FRand() * azm_reactors[idx].height - azm_reactors[idx].height * 0.5);
+      ok = true;
+      for(j = 0; j < n; j++)
+         if(vsize(cand - azm_pts[idx * AZM_REACTOR_PTS + j]) < min_dist){ ok = false; break; }
+      if(ok){ azm_pts[idx * AZM_REACTOR_PTS + n] = cand; n++; }
+   }
+   log("REGEN idx="$idx$" n="$n);   // debug
+   azm_pts_n[idx] = n;
+}
+
+function azm_regen_all_reactor_pts(){
+   local int i;
+   for(i = 0; i < azm_reactors_n; i++) azm_regen_reactor_pts(i);
+}
+
+function azm_ensure_reactor_pts(){
+   local int i;
+   local bool ok;
+   if(azm_reactors_n <= 0) return;
+   // heuristic: after save+load, transient pts are wiped.
+   // if first reactor has pts_n==0 or first 8 pts are all zero -> rebuild all
+   ok = (azm_pts_n[0] > 0);
+   if(ok){
+      ok = false;
+      for(i = 0; i < 8 && i < azm_pts_n[0]; i++)
+         if(!(azm_pts[0 * AZM_REACTOR_PTS + i] == vect(0,0,0))){ ok = true; break; }
+   }
+   log("AZM ensure: reactors="$azm_reactors_n$" pts0="$azm_pts_n[0]$" regen="$(!ok)); //debug
+   if(ok) return;
+   azm_regen_all_reactor_pts();
+   for(i = 0; i < azm_reactors_n; i++) log("AZM ensure pts["$i$"]="$azm_pts_n[i]); //debug
 }
 
 exec function sci_install_areamap(){
@@ -3769,7 +4188,7 @@ exec function sci_install_areamap(){
 function info FindAMD(){
    local info a;
    foreach allactors(class'info', a){
-     if(instr(caps(string(a.group)),"SCI_AREAMAP") != -1) return a;
+     if(instr(caps(string(a.group)),"AREAMAP") != -1) return a;
    }
    return none;
 }
@@ -3778,7 +4197,7 @@ function actor FindAZMD(){
    local actor a;
    foreach allactors(class'actor', a){  // todo change to Info
 //     if(!a.isa('knife')) continue;
-     if(instr(caps(string(a.group)),"SCI_AREAMAP") != -1) return a;
+     if(instr(caps(string(a.group)),"AREAMAP") != -1) return a;
    }
    return none;
 }
@@ -3807,7 +4226,7 @@ function give_aer_slaveitems(){
    local AerAm_core c;
    local AerAm_shard s;
    local AerWk_TDS t;
-   local AerGr_PO mpo;
+//                 local AerGr_PO mpo; // todo pawn overlay - removed
 //   local actor m;
    if(owner == none) return;
    p = playerpawn(owner);
@@ -3829,10 +4248,10 @@ function give_aer_slaveitems(){
       m = spawn(class'AZM_DataCell',,,vect(32767,32767,32767));
       p.addinventory(m); m.becomeitem(); m.gotostate('idle2');   }
    areamap_datacell = m;*/
-   mpo = none;
-   foreach allactors(class'AerGr_PO',mpo) break;
-   if(mpo==none) mpo = spawn(class'AerGr_PO',,,vect(32767,32767,32767));
-   azm_pawn_overlay = mpo;
+//              mpo = none;                                   // todo pawnovl - removed
+//              foreach allactors(class'AerGr_PO',mpo) break;
+//              if(mpo==none) mpo = spawn(class'AerGr_PO',,,vect(32767,32767,32767));
+//              azm_pawn_overlay = mpo;
    transmsg_receiver = t;
    transmsg_receiver.w = self;
 }
@@ -4103,6 +4522,14 @@ function aercfg_advance_hello(){
    }
 }
 
+final function int GetB64Val(string char){
+    local int i;
+    for (i = 0; i < 64; i++){
+        if (Mid(b64_lookup, i, 1) == char) return i;
+    }
+    return 0;
+}
+
 function Destroyed(){
    super.destroyed();
    query_forcefield(0,0);
@@ -4165,7 +4592,6 @@ defaultproperties{
    canvas_finfo=None
    laserdot=None
    laserdotsec=None
-   azm_pawn_overlay=None
    btn_origin=(X=0.0,Y=0.0,Z=0.0)
    pos_objective=(X=0.0,Y=0.0,Z=0.0)
    ava_objective=false
@@ -4287,4 +4713,11 @@ defaultproperties{
    azm_hold_yawr=0.0
    azm_mode_latch=0
    azm_mode_latch_t=0.0
+   azm_fixed_yaw=false
+   azm_pivot_enable=false
+   meshverts_qty=0
+   readbuff_meshverts_seek=0
+   readbuff_mapdata_qty=0
+   readbuff_entry_qty=0
+   ena_accept_mapdata=false
 }

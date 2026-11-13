@@ -191,7 +191,7 @@ function AERSpawnSparks(vector hitloc,vector hitnor){
 
 function AERFleshEffects(actor other, vector hitloc, vector momentum){
 //   local effects e;  // todo check HER and how to replace if UT
-   local AerGr_afterglow ag;
+//   local AerGr_afterglow ag;
    local vector v, mo;
    local byte k;
    local rotator splatRotator;
