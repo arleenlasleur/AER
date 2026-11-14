@@ -1458,7 +1458,7 @@ function render_azm_holo_z(canvas c){
             if(azm_reactors[r_i].is_opened)   pc = makecolor(120,120,180);  }
          c.drawcolor = pc;
          if(!Azm_reactors[r_i].is_lift){                                         // shade doors if nomatch z
-             if(abs(rel.z /* - azm_reactors[r_i].height/2 */ - rel_own.z) > 80.0){
+             if(abs(rel.z - rel_own.z + azm_reactors[r_i].height/2) > 80.0){
                 c.drawcolor = makecolor(pc.r>>1,pc.g>>1,pc.b>>1);
              }
          }
@@ -2039,7 +2039,7 @@ function cut_message(string msg_raw,byte max_cols,byte max_rows,bool bSignTarg){
 function postrender(canvas c){
    if(canvas_finfo == none) return;
    c.font = canvas_finfo.GetCanvasFont();
-//   return;
+   return;
    c.setpos(100,70);
    c.drawtext(debugstr);
 }
@@ -4032,6 +4032,7 @@ function bool azm_parse_reactor_row(string row, int idx){
    local int    i, p, pos;
    local mover  mv;
    local trigger tr;
+   local bool trig_state;
    // ============================================ empty nonparsed template ==
    f[0] = "?";            // name
    f[1] = "2";            // bIsLift
@@ -4076,10 +4077,14 @@ function bool azm_parse_reactor_row(string row, int idx){
    azm_reactors[idx].mover_ref = mv;
    azm_reactors[idx].lift_offset = vect(0,0,0);                       // default reactor vs mover pivot offset - zero
    if(mv==none)                          return true; // don't handle uncontrolled
-   azm_reactors[idx].lift_offset = azm_reactors[idx].center - mv.KeyPos[0]; // track real mover pivot offset if able
-   if(!mv.isInState('TriggerControl'))   return true; // ignore non-trigger states
-   if(!mv.isInState('TriggerToggle'))    return true;
-   if(!mv.isInState('TriggerOpenTimed')) return true;
+// azm_reactors[idx].lift_offset = azm_reactors[idx].center - mv.KeyPos[0]; // track real mover pivot offset if able
+   azm_reactors[idx].lift_offset = azm_reactors[idx].center - mv.KeyPos[mv.KeyNum]; // new code
+   trig_state = false;
+   if(mv.isInState('TriggerControl'))   trig_state = true; // ignore non-trigger states
+   if(mv.isInState('TriggerToggle'))    trig_state = true;
+   if(mv.isInState('TriggerOpenTimed')) trig_state = true;
+   broadcastmessage("parsereactor: " $ mv);
+   if(!trig_state) return true;
    foreach AllActors(class'Trigger', tr){ if(mv.tag == tr.event) break; tr = none; }
    azm_reactors[idx].trig_ref = tr;
    return true;
