@@ -491,8 +491,8 @@ var float azm_hold_viewup, azm_hold_viewdown;  // aim trackers
 var float azm_hold_yawl, azm_hold_yawr;
 
 const AZM_REACTOR_MAX = 256;       // more needs more mem, then need to split array, more complicated code
-const AZM_REACTOR_PTS = 64;        // 16x16uu surface resolution
-const AZM_REACTOR_PTSxMAX = 16384; // max adressable
+const AZM_REACTOR_MAXPTS = 64;        // 16x16uu surface resolution
+const AZM_REACTOR_RAWTOTAL = 16384; // max adressable
 
 struct azm_reactor {
    var name     mover_name;     // linked mover name
@@ -506,6 +506,7 @@ struct azm_reactor {
    var vector   center_now;     // actual pivot for lift anim
    var rotator  rot;            // Yaw,Pitch,Roll
    var float    width, height;  // W,H
+   var int      used_dots;      // MaxDotsUsage
    var byte     last_keynum;     // lifts-related
    var byte     prev_frame;
    var float    segment_start_t;
@@ -514,7 +515,7 @@ struct azm_reactor {
 var azm_reactor azm_reactors[AZM_REACTOR_MAX];   // NOT transient, NOT travel
 var int         azm_reactors_n;                  // todo rename this to azm_reactors_data
 
-var transient vector azm_pts[AZM_REACTOR_PTSxMAX];
+var transient vector azm_pts[AZM_REACTOR_RAWTOTAL];
 var transient int    azm_pts_n[AZM_REACTOR_MAX];
 
 var int readbuff_reactors_qty;
@@ -1346,7 +1347,7 @@ function render_azm_holo_z(canvas c){
    local float  xc, yc, zc,      // proj for dir into virt camera coord sysytem
     depth;     // ???
 
-    local int   r_i, p_i;        // reactors-related
+    local int   r_i, p_i; //, r_dots;        // reactors-related
     local vector r_loc ; //, r_ax, r_ay, r_az; // todo del
     local rotator r_rot;
 
@@ -1421,7 +1422,6 @@ function render_azm_holo_z(canvas c){
       depth = rel_eye dot xv;
       if(depth <= 1.0) continue; // todo raise to 8.0
 
-
 //    xp = int( (rel_eye dot yv) * clipxdiv2 / depth + clipxdiv2 );
       xp = int( clipxdiv2 - (rel_eye dot yv) * clipxdiv2 / depth ); // new code
       yp = int(-(rel_eye dot zv) * clipxdiv2 / depth + clipydiv2 );
@@ -1429,11 +1429,8 @@ function render_azm_holo_z(canvas c){
 
       c.drawcolor = (abs(rel.z - rel_own.z) < 80.0)  // todo change to const
           ? makecolor(200,200,255)   // mathz floor map, highlight
-          : makecolor(120,120,153);  // regular map
-
+          : makecolor(60,60,76);  // regular map
 //      c.drawcolor = makecolor(120,120,153);
-
-
       c.setpos(xp,yp);  c.drawicon(texture'aerpixel',0.5);
    }
    for(r_i = 0; r_i < azm_reactors_n; r_i++){          // pass 2: reactors
@@ -1445,7 +1442,7 @@ function render_azm_holo_z(canvas c){
 //          ( azm_reactors[r_i].is_opened || azm_reactors[r_i].is_lift ) ) continue;
 
          rel = (azm_reactors[r_i].center_now - azm_reactors[r_i].center // prevent double absolute delta
-            + azm_pts[r_i * AZM_REACTOR_PTS + p_i]) - AZM_Align;
+            + azm_pts[r_i * AZM_REACTOR_MAXPTS + p_i]) - AZM_Align;
          xc = rel dot cam_right;  yc = rel dot cam_up;  zc = rel dot cam_fwd;
          dir = anchor + mapoff + xc * azm_holo_scale * yv  + yc * azm_holo_scale * zv  + zc * azm_holo_scale * xv;
          rel_eye = dir - owner_location;
@@ -1460,6 +1457,11 @@ function render_azm_holo_z(canvas c){
             if(azm_reactors[r_i].is_unlocked) pc = makecolor(120,180,120);
             if(azm_reactors[r_i].is_opened)   pc = makecolor(120,120,180);  }
          c.drawcolor = pc;
+         if(!Azm_reactors[r_i].is_lift){                                         // shade doors if nomatch z
+             if(abs(rel.z /* - azm_reactors[r_i].height/2 */ - rel_own.z) > 80.0){
+                c.drawcolor = makecolor(pc.r>>1,pc.g>>1,pc.b>>1);
+             }
+         }
          c.setpos(xp, yp);  c.drawicon(texture'aerpixel', 0.5);
       }
    }
@@ -1518,10 +1520,10 @@ function do_tick_azm_altmap(playerpawn p, float f){
    switch(azm_cam_ctl_mode){
       case AMVCP_X_DEC: azm_map_offset.x += (azm_cam_rate>>3) * f; fixvar = 1; break;
       case AMVCP_X_INC: azm_map_offset.x -= (azm_cam_rate>>3) * f; fixvar = 1; break;
-      case AMVCP_Y_DEC: azm_map_offset.y += (azm_cam_rate>>3) * f; fixvar = 2; break;
-      case AMVCP_Y_INC: azm_map_offset.y -= (azm_cam_rate>>3) * f; fixvar = 2; break;
-      case AMVCP_Z_DEC: azm_map_offset.z += (azm_cam_rate>>3) * f; fixvar = 3; break;
-      case AMVCP_Z_INC: azm_map_offset.z -= (azm_cam_rate>>3) * f; fixvar = 3; break;
+      case AMVCP_Y_DEC: azm_map_offset.y += (azm_cam_rate>>4) * f; fixvar = 2; break;
+      case AMVCP_Y_INC: azm_map_offset.y -= (azm_cam_rate>>4) * f; fixvar = 2; break;
+      case AMVCP_Z_DEC: azm_map_offset.z += (azm_cam_rate>>4) * f; fixvar = 3; break;
+      case AMVCP_Z_INC: azm_map_offset.z -= (azm_cam_rate>>4) * f; fixvar = 3; break;
       case AMVCA_HORZ_DEC: azm_cam_yaw   += (azm_cam_rate<<3) * f; fixvar = 4; break;
       case AMVCA_HORZ_INC: azm_cam_yaw   -= (azm_cam_rate<<3) * f; fixvar = 4; break;
       case AMVCA_VERT_DEC: azm_cam_pitch += (azm_cam_rate<<2) * f; fixvar = 5; break;
@@ -4026,7 +4028,7 @@ function azm_harvest_holomap(actor ahm_data){          // oneshot reading
 }
 
 function bool azm_parse_reactor_row(string row, int idx){
-   local string f[10];
+   local string f[11];
    local int    i, p, pos;
    local mover  mv;
    local trigger tr;
@@ -4035,10 +4037,10 @@ function bool azm_parse_reactor_row(string row, int idx){
    f[1] = "2";            // bIsLift
    f[2] = "?"; f[3] = "?"; f[4] = "?";   // center
    f[5] = "?"; f[6] = "?"; f[7] = "?";   // rot
-   f[8] = "?"; f[9] = "?";               // width, height
+   f[8] = "?"; f[9] = "?"; f[10]= "?"; // width, height, dots
    // =============================================================== parse ==
    p = 0;
-   while(p < 10){
+   while(p < 11){
       pos = InStr(row, ";");
       if(pos == -1){
          f[p] = row;     // tail
@@ -4050,18 +4052,11 @@ function bool azm_parse_reactor_row(string row, int idx){
       p++;
    }
    // ============================================================ validate ==
-   if(p < 10)                     return false; // less than 10 ents
+   if(p < 11)                     return false; // less than 11 ents
    if(f[1] != "0" && f[1] != "1") return false; // bIsLift
-   for(i=2;i<=9;i++)
+   for(i=2;i<=9;i++) // todo separate valid func for ndots
       if(!azm_valid_field(f[i], 32767)) return false;
-/*   if(!azm_valid_field(f[2], 32767)) return false;    // old code
-   if(!azm_valid_field(f[3], 32767)) return false;
-   if(!azm_valid_field(f[4], 32767)) return false;
-   if(!azm_valid_field(f[5], 32767)) return false;
-   if(!azm_valid_field(f[6], 32767)) return false;
-   if(!azm_valid_field(f[7], 32767)) return false;
-   if(!azm_valid_field(f[8], 32767)) return false;
-   if(!azm_valid_field(f[9], 32767)) return false;*/
+   if(!azm_valid_field(f[10], AZM_REACTOR_MAXPTS)) return false;
    if(float(f[8]) <= 0.0 || float(f[9]) <= 0.0) return false;   // skip by zero W/H
    if(f[0] == "?" || len(f[0]) == 0)            return false;   // skip by empty mover handle
    // ============================================== all valid, safe to use ==
@@ -4075,6 +4070,7 @@ function bool azm_parse_reactor_row(string row, int idx){
    azm_reactors[idx].rot.Roll   = int(f[7]);
    azm_reactors[idx].width      = float(f[8]);
    azm_reactors[idx].height     = float(f[9]);
+   azm_reactors[idx].used_dots  = clamp(int(f[10]), 16, AZM_REACTOR_MAXPTS);
    mv = none;
    foreach AllActors(class'Mover', mv){ if(string(mv.Name) == f[0]) break; mv = none; }
    azm_reactors[idx].mover_ref = mv;
@@ -4108,7 +4104,7 @@ function float azm_surface_min_dist(int idx){
 // ///    if(area <= 0.0) return 1.0;
 // ///    want = (int(sqrt(area)) >> 2);
 // /// //   want *= 0.01;  // todo adj
-// ///    want = clamp(want, 16, AZM_REACTOR_PTS);
+// ///    want = clamp(want, 16, AZM_REACTOR_MAXPTS);
 // ///    target = area / want;
 // /// //   return sqrt(target) * 0.7;    // todo adjust this
 // ///    return sqrt(target) * 2.8;
@@ -4128,14 +4124,16 @@ function azm_regen_reactor_pts(int idx){
    log("REGEN idx="$idx$" want_md="$min_dist$" area="$azm_reactors[idx].width
        *azm_reactors[idx].height$" iters=0");   // debug
    n = 0;
-   for(attempt = 0; attempt < AZM_REACTOR_PTS * 8 && n < AZM_REACTOR_PTS; attempt++){
+
+   for(attempt = 0; attempt < azm_reactors[idx].used_dots * 8 &&
+        n < azm_reactors[idx].used_dots && n < AZM_REACTOR_MAXPTS; attempt++){
       cand = loc
            + ay * (FRand() * azm_reactors[idx].width  - azm_reactors[idx].width  * 0.5)
            + az * (FRand() * azm_reactors[idx].height - azm_reactors[idx].height * 0.5);
       ok = true;
       for(j = 0; j < n; j++)
-         if(vsize(cand - azm_pts[idx * AZM_REACTOR_PTS + j]) < min_dist){ ok = false; break; }
-      if(ok){ azm_pts[idx * AZM_REACTOR_PTS + n] = cand; n++; }
+         if(vsize(cand - azm_pts[idx * AZM_REACTOR_MAXPTS + j]) < min_dist){ ok = false; break; }
+      if(ok){ azm_pts[idx * AZM_REACTOR_MAXPTS + n] = cand; n++; }
    }
    log("REGEN idx="$idx$" n="$n);   // debug
    azm_pts_n[idx] = n;
@@ -4156,7 +4154,7 @@ function azm_ensure_reactor_pts(){
    if(ok){
       ok = false;
       for(i = 0; i < 8 && i < azm_pts_n[0]; i++)
-         if(!(azm_pts[0 * AZM_REACTOR_PTS + i] == vect(0,0,0))){ ok = true; break; }
+         if(!(azm_pts[0 * AZM_REACTOR_MAXPTS + i] == vect(0,0,0))){ ok = true; break; }
    }
    log("AZM ensure: reactors="$azm_reactors_n$" pts0="$azm_pts_n[0]$" regen="$(!ok)); //debug
    if(ok) return;
